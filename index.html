@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card Canvas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Main application shell and top-level menus. -->
+  <header id="header_main" class="header-main">
+    <nav class="main-actions" aria-label="Application menus">
+      <div class="file-menu">
+        <button id="fileMenuButton" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">File</button>
+        <div id="fileMenuPanel" class="menu-panel" hidden>
+          <button id="newProject" type="button">New Project</button>
+          <button id="loadProject" type="button">Load Project</button>
+          <button id="saveProject" type="button">Save Project</button>
+          <button id="saveAsProject" type="button">Save Project As</button>
+          <button id="exportHtml" type="button">Export Project as HTML</button>
+          <button id="exportText" type="button">Export Project as Text</button>
+          <button id="exportCharacterReport" type="button">Export Character Report</button>
+          <details class="menu-submenu">
+            <summary>Export Scene Report</summary>
+            <button type="button" data-scene-report="chronological">Chronological</button>
+            <button type="button" data-scene-report="time">Time</button>
+            <button type="button" data-scene-report="location">Location</button>
+            <button type="button" data-scene-report="prefix">INT./EXT.</button>
+          </details>
+        </div>
+      </div>
+      <div class="file-menu">
+        <button id="settingsMenuButton" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">Settings</button>
+        <div id="settingsMenuPanel" class="menu-panel settings-menu-panel" hidden>
+          <details class="menu-submenu">
+            <summary>Card Covers</summary>
+            <button type="button" data-setting-card-med="text">Text</button>
+            <button type="button" data-setting-card-med="image">Image</button>
+          </details>
+          <details class="menu-submenu">
+            <summary>New Card Axis</summary>
+            <button type="button" data-setting-axis="x">X Axis</button>
+            <button type="button" data-setting-axis="y">Y Axis</button>
+          </details>
+          <details class="menu-submenu">
+            <summary>Naming Scheme</summary>
+            <button id="openNamingScheme" type="button">
+              <span class="material-symbols-outlined" aria-hidden="true">text_fields</span>
+              Edit Naming Scheme
+            </button>
+          </details>
+          <details class="menu-submenu">
+            <summary>Auto-Save</summary>
+            <label class="menu-check"><input id="autoSaveToggle" name="autoSaveToggle" type="checkbox" checked> Enabled</label>
+            <button type="button" data-auto-save-interval="60000">60 Seconds</button>
+            <button type="button" data-auto-save-interval="300000">5 Minutes</button>
+            <button type="button" data-auto-save-interval="600000">10 Minutes</button>
+            <button type="button" data-auto-save-interval="1200000">20 Minutes</button>
+          </details>
+          <button id="openGridSize" type="button">Grid Size</button>
+          <button id="openCharactersDialog" type="button">Manage Characters</button>
+          <button id="prefCardColorButton" type="button">Default Card Color</button>
+        </div>
+      </div>
+      <div class="file-menu window-menu">
+        <button id="windowMenuButton" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">Window</button>
+        <div id="windowMenuPanel" class="menu-panel" hidden>
+          <button id="windowPopout" type="button">Pop Out Story</button>
+          <button id="windowPopin" type="button" disabled>Pop In Story</button>
+          <button id="jumpToStart" type="button">Jump To Start</button>
+          <button id="jumpToEnd" type="button">Jump To End</button>
+          <button id="alignTimelineCards" type="button">Align All Cards</button>
+          <button id="expandAllCards" type="button">Expand Cards</button>
+          <button id="compactAllCards" type="button">Collapse Cards</button>
+          <button id="toggleBranding" type="button">Hide Branding</button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="brand-lockup" aria-label="Card Canvas">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <strong>Card Canvas</strong>
+    </div>
+
+    <div class="header-spacer" aria-hidden="true"></div>
+  </header>
+
+  <!-- Split workspace containing the card canvas and generated story output. -->
+  <main id="window_main" class="window-main">
+    <div id="mobileTabs" class="mobile-tabs" role="tablist" aria-label="Mobile views">
+      <button id="mobileCardsTab" class="mobile-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="window_cards">Cards</button>
+      <button id="mobileTextTab" class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="window_text">Story</button>
+    </div>
+
+    <section id="window_cards" class="window-pane window-cards is-focused" tabindex="0" aria-label="Card canvas">
+      <header id="header_cards" class="pane-header">
+        <div class="card-add-tools">
+          <button id="mobileAddCard" class="icon-button mobile-add-card" type="button" title="Add card" aria-label="Add card">
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
+          <button id="noteAddCard" class="icon-button note-add-card" type="button" title="Add note" aria-label="Add note card">
+            <span class="material-symbols-outlined" aria-hidden="true">post_add</span>
+          </button>
+          <button id="dialogAddCard" class="icon-button dialog-add-card" type="button" title="Add dialog" aria-label="Add dialog card">
+            <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
+          </button>
+          <button id="bulkSelectMode" class="icon-button lasso-mode-button" type="button" title="Switch to lasso mode" aria-label="Switch to lasso mode" aria-pressed="false">
+            <span class="material-symbols-outlined icon-grab-mode" aria-hidden="true">crop_free</span>
+            <span class="material-symbols-outlined icon-lasso-mode" aria-hidden="true">pan_tool</span>
+          </button>
+        </div>
+        <output id="projectNameInput" class="project-name-input" aria-label="Project name">Untitled</output>
+        <div class="pane-title">
+          <span>Cards</span>
+          <output id="cardCount">0</output>
+        </div>
+      </header>
+
+      <div id="canvasViewport" class="canvas-viewport" aria-label="Pannable card canvas">
+        <div id="canvasWorld" class="canvas-world">
+          <svg id="lineLayer" class="line-layer" viewBox="-100000 -100000 200000 200000" aria-label="Story timeline and card connections"></svg>
+          <div id="cardsLayer" class="cards-layer"></div>
+        </div>
+        <div id="lassoRect" class="lasso-rect" hidden></div>
+        <div class="zoom-overlay" aria-label="Card canvas zoom controls">
+          <button id="zoomOut" class="icon-button" type="button" title="Zoom out" aria-label="Zoom out">
+            <span class="material-symbols-outlined" aria-hidden="true">remove</span>
+          </button>
+          <output id="zoomReadout" class="zoom-readout">100%</output>
+          <button id="zoomIn" class="icon-button" type="button" title="Zoom in" aria-label="Zoom in">
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
+        </div>
+        <div class="history-overlay" aria-label="Undo and redo">
+          <button id="undoAction" class="icon-button" type="button" title="Undo" aria-label="Undo" disabled>
+            <span class="material-symbols-outlined" aria-hidden="true">undo</span>
+          </button>
+          <button id="redoAction" class="icon-button" type="button" title="Redo" aria-label="Redo" disabled>
+            <span class="material-symbols-outlined" aria-hidden="true">redo</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div id="paneResizer" class="pane-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize cards and story panes"></div>
+
+    <section id="window_text" class="window-pane window-text" tabindex="0" aria-label="Structured text output">
+      <header id="header_text" class="pane-header">
+        <div class="pane-title">
+          <span>Story</span>
+          <output id="storyCount">0</output>
+        </div>
+        <output id="mobileStoryProjectTitle" class="mobile-story-project-title">Untitled</output>
+        <div class="story-tools">
+          <div class="file-menu assets-menu">
+            <button id="assetsMenuButton" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter assets" aria-label="Filter assets">
+              <span class="material-symbols-outlined" aria-hidden="true">filter_list</span>
+            </button>
+            <div id="assetsMenuPanel" class="menu-panel assets-menu-panel" hidden>
+              <label class="menu-check"><input name="storyFieldHeader" type="checkbox" data-story-field="header"> Title</label>
+              <label class="menu-check"><input name="storyFieldAct" type="checkbox" data-story-field="act"> ACT</label>
+              <label class="menu-check"><input name="storyFieldLocation" type="checkbox" data-story-field="location" checked> Location</label>
+              <label class="menu-check"><input name="storyFieldCharacters" type="checkbox" data-story-field="characters"> Characters</label>
+              <label class="menu-check"><input name="storyFieldNotes" type="checkbox" data-story-field="notes" checked> Notes</label>
+              <label class="menu-check"><input name="storyFieldNoteCards" type="checkbox" data-story-field="noteCards" checked> Note Cards</label>
+              <label class="menu-check"><input name="storyFieldMedia" type="checkbox" data-story-field="media" checked> Media</label>
+              <label class="menu-check"><input name="storyFieldSupporting" type="checkbox" data-story-field="supporting" checked> Body</label>
+              <label class="menu-check"><input name="storyFieldTitleCard" type="checkbox" data-story-field="titleCard"> Title Card</label>
+            </div>
+          </div>
+          <button id="textPopout" class="icon-button" type="button" title="Pop out story" aria-label="Pop out story">
+            <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+          </button>
+        </div>
+      </header>
+
+      <article id="storyOutput" class="story-output" aria-live="polite"></article>
+    </section>
+  </main>
+
+  <!-- Modal dialogs for project actions, settings, and card maintenance. -->
+  <dialog id="mediaDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Image Options</h2>
+      </header>
+      <footer>
+        <button id="deleteMedia" class="button" value="delete" type="button">Delete Image</button>
+        <button id="replaceMedia" class="button" value="replace" type="button">Select New Image</button>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="newProjectDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>New Project?</h2>
+      </header>
+      <p>Save changes before starting a new project?</p>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="discardNewProject" class="button" value="discard" type="button">Discard</button>
+        <button id="saveNewProject" class="button" value="save" type="button">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="colorDialog" class="app-dialog color-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Color</h2>
+      </header>
+      <div class="dialog-body">
+        <input id="centerColorInput" name="centerColorInput" class="center-color-input" type="color" value="#ffffff" aria-label="Color">
+      </div>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="applyColor" class="button" value="default" type="submit">Apply</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="gridDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Grid Size</h2>
+      </header>
+      <div class="dialog-body">
+        <label class="form-row">
+          <span>Grid Size</span>
+          <input id="prefGridSize" name="prefGridSize" type="number" min="8" max="96" step="4" value="24">
+        </label>
+      </div>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button class="button" value="default" type="submit">Done</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="namingDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Naming Scheme</h2>
+      </header>
+      <div class="dialog-body">
+        <label class="form-row form-row-fill">
+          <span>
+            <span class="material-symbols-outlined" aria-hidden="true">text_fields</span>
+            Name Text
+          </span>
+          <input id="namingPrefixInput" name="namingPrefixInput" type="text" maxlength="25" value="Scene" autocomplete="off">
+        </label>
+        <fieldset class="segmented-field">
+          <legend>Sequence</legend>
+          <label>
+            <input type="radio" name="namingSequence" value="number" checked>
+            <span class="material-symbols-outlined" aria-hidden="true">numbers</span>
+            Number
+          </label>
+          <label>
+            <input type="radio" name="namingSequence" value="letter">
+            <span class="material-symbols-outlined" aria-hidden="true">abc</span>
+            Letter
+          </label>
+        </fieldset>
+      </div>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button class="button" value="default" type="submit">Done</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="deleteDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Delete card?</h2>
+      </header>
+      <p>Connected lines for this card will also be removed.</p>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="confirmDelete" class="button button-danger" value="delete" type="submit">Delete</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="charactersDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Characters</h2>
+      </header>
+      <div class="dialog-body">
+        <div class="character-entry-row">
+          <button id="addCharacter" class="icon-button" type="button" title="Add character" aria-label="Add character">
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
+          <button id="copyCharacter" class="icon-button" type="button" title="Copy selected character" aria-label="Copy selected character">
+            <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+          </button>
+          <input id="characterNameInput" type="text" autocomplete="off" placeholder="Name" aria-label="Character name">
+          <button id="deleteCharacter" class="icon-button button-danger character-delete-button" type="button" title="Delete selected character" aria-label="Delete selected character" hidden>
+            <span class="material-symbols-outlined" aria-hidden="true">delete</span>
+          </button>
+        </div>
+        <select id="characterList" name="characterList" class="character-list" size="8" aria-label="Project characters"></select>
+      </div>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button class="button" value="default" type="submit">Done</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Hidden file inputs are triggered from visible buttons and still carry labels for accessibility scanners. -->
+  <input id="projectFileInput" name="projectFileInput" type="file" accept="application/json,.json" aria-label="Load project file" title="Load project file" hidden>
+  <input id="mediaFileInput" name="mediaFileInput" type="file" accept="image/*" aria-label="Select card image" title="Select card image" hidden>
+
+  <script src="app.js"></script>
+</body>
+</html>
