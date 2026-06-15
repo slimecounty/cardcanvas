@@ -126,6 +126,7 @@ const card_state = {
   undoStack: [],
   redoStack: [],
   restoringHistory: false,
+  timelineY: null,
   storylineTitles: {},
   pan: { x: 84, y: 72 },
   zoom: 1,
@@ -821,6 +822,7 @@ function captureHistorySnapshot() {
     cards: card_state.cards.map(cloneCardForHistory),
     lines: card_state.lines.map((line) => ({ ...line })),
     preferences: { ...card_state.preferences },
+    timelineY: card_state.timelineY,
     storylineTitles: { ...card_state.storylineTitles },
     characters: [...card_state.characters],
     pan: { ...card_state.pan },
@@ -860,6 +862,7 @@ function restoreHistorySnapshot(snapshot) {
   card_state.cards = snapshot.cards.map(cloneCardForHistory);
   card_state.lines = snapshot.lines.map((line) => ({ ...line }));
   card_state.preferences = { ...snapshot.preferences };
+  card_state.timelineY = Number.isFinite(snapshot.timelineY) ? snapshot.timelineY : null;
   card_state.storylineTitles = { ...snapshot.storylineTitles };
   card_state.characters = [...(snapshot.characters || [])];
   card_state.pan = { ...snapshot.pan };
@@ -939,7 +942,7 @@ function renderCardTop(card, expanded) {
   const controlTitle = expanded ? "Collapse" : "Expand";
   const controlIcon = expanded ? card_icons.close : card_icons.expand;
   const disabled = card.editable ? "" : " disabled";
-  const linkControl = isTitleCard(card) || isTimelineCard(card)
+  const linkControl = isTimelineOrderedStoryCard(card) || isTitleCard(card)
     ? '<span class="card-link-spacer" aria-hidden="true"></span>'
     : `<button class="icon-button card-link" type="button" data-action="connect" title="Drag to connect" aria-label="Drag to connect from this card">
         ${card_icons.link}
@@ -1064,7 +1067,7 @@ function renderCharacterPicker(card) {
 // Renders compact card UI markup or state.
 function renderCompactCard(card) {
   const useImage = cardSupportsMedia(card) && card_state.preferences.cardMedPref === "image" && getMediaPreviewSource(card);
-  const linkButton = isTitleCard(card) || isTimelineCard(card)
+  const linkButton = isTimelineOrderedStoryCard(card) || isTitleCard(card)
     ? ""
     : `<button class="icon-button card-link compact-card-link" type="button" data-action="connect" title="Drag to connect" aria-label="Drag to connect from this card">
       ${card_icons.link}
@@ -1440,7 +1443,7 @@ function handleCompactCardDoublePress(event, card) {
 // Supports start card connection.
 function startCardConnection(event, card) {
   if (event.button !== 0) return;
-  if (isTimelineCard(card)) return;
+  if (isTimelineOrderedStoryCard(card) || isTitleCard(card)) return;
   event.preventDefault();
   event.stopPropagation();
   setActivePane("cards");
@@ -1839,7 +1842,7 @@ function createCardAt(x, y, options = {}) {
   if (!options.skipHistory) recordHistory();
   const cardNumber = getNextCardTitleIndex(cardType);
   const size = { ...card_sizes.expanded };
-  const position = isTimelineCardType(cardType)
+  const position = isAutoTimelineCardType(cardType)
     ? findOpenTimelinePosition(null, x, size)
     : findNonOverlappingPosition(null, x, y, size);
   const card = {
@@ -1960,14 +1963,14 @@ function createCardFromButton(type) {
       x = point.x - card_sizes.expanded.width / 2;
       y = point.y;
     }
-  } else if (isTimelineCardType(cardType) && last) {
+  } else if (isAutoTimelineCardType(cardType) && last) {
     const grid = card_state.preferences.gridSize;
     x = last.x + getCardSize(last).width + grid;
     y = getTimelineTopForSize(card_sizes.expanded);
   } else {
     const rect = dom.canvasViewport.getBoundingClientRect();
     const titleCard = getTitleCard();
-    if (isTimelineCardType(cardType)) {
+    if (isAutoTimelineCardType(cardType)) {
       x = getTimelineStartX();
       y = getTimelineTopForSize(card_sizes.expanded);
     } else if (titleCard) {
@@ -2139,18 +2142,14 @@ function createLine(sourceId, targetId) {
   if (!sourceCard || (!targetCard && targetId !== PROJECT_TARGET_ID)) return;
 
   if (isTitleCard(sourceCard)) {
-    showNotice("Title card cannot create outgoing connections");
-    return;
-  }
-  if (isTitleCard(targetCard) && !isNoteCard(sourceCard)) {
-    showNotice("Only notes can connect to the title card");
+    showNotice("Use Timeline To Order Title Card");
     return;
   }
   if ((isCharacterCard(sourceCard) || isCharacterCard(targetCard)) && !(isCharacterCard(sourceCard) && isCharacterCard(targetCard))) {
     showNotice("Character cards connect only to character cards");
     return;
   }
-  if (isTimelineCard(sourceCard) && isTimelineCard(targetCard)) {
+  if (isTimelineOrderedStoryCard(sourceCard) && isTimelineOrderedStoryCard(targetCard)) {
     showNotice("Use Timeline To Order Story");
     return;
   }
@@ -2262,6 +2261,8 @@ function refreshConnectionFlags() {
       }
       if (target && (
         (cardAppearsInStoryline(source) && cardAppearsInStoryline(target))
+        || isTitleCard(source)
+        || isTitleCard(target)
         || (isNoteCard(source) && isNoteCard(target))
         || (isCharacterCard(source) && isCharacterCard(target))
       )) {
@@ -2437,7 +2438,7 @@ function renderLines() {
 
 // Returns whether a stored line is superseded by the single visual timeline.
 function isTimelineConnection(line) {
-  return isTimelineCard(findCard(line.sourceId)) && isTimelineCard(findCard(line.targetId));
+  return isTimelineOrderedStoryCard(findCard(line.sourceId)) && isTimelineOrderedStoryCard(findCard(line.targetId));
 }
 
 // Supports line would cross.
@@ -2543,8 +2544,10 @@ function renderStory() {
 // Returns story body html.
 function getStoryBodyHtml(storylines = buildStorylines(), options = {}) {
   const fields = getActiveStoryFields();
-  const projectTitle = fields.titleCard ? renderProjectTitleBlock(options) : "";
-  const projectNotes = fields.titleCard ? renderFootnotesForTarget(PROJECT_TARGET_ID, options) : "";
+  const titleCard = getTitleCard();
+  const titleIsOnTimeline = fields.titleCard && titleCard && cardTouchesTimeline(titleCard);
+  const projectTitle = fields.titleCard && !titleIsOnTimeline ? renderProjectTitleBlock(options) : "";
+  const projectNotes = fields.titleCard && !titleIsOnTimeline ? renderFootnotesForTarget(PROJECT_TARGET_ID, options) : "";
   const emptyStory = projectTitle || projectNotes ? "" : '<div class="empty-story">Place scene or dialog cards on the timeline to build story.</div>';
   return storylines.length
     ? `${projectTitle}${projectNotes}${storylines.map((group, index) => renderStoryline(group, index, storylines.length > 1 && fields.act, options)).join("")}`
@@ -2600,6 +2603,7 @@ function renderStoryline(group, index, showTitle, options = {}) {
 // Builds one card section in the story output.
 function renderStoryCard(card, options = {}) {
   const fields = getActiveStoryFields();
+  if (isTitleCard(card)) return fields.titleCard ? renderStoryTitleCard(card, options) : "";
   const mediaPath = options.exportImages ? exportMediaPath(card.mediaPath) : getMediaPreviewSource(card);
   const characters = getCardCharacters(card).join(", ");
   const dialogCard = isDialogCard(card);
@@ -2627,12 +2631,25 @@ function renderStoryCard(card, options = {}) {
   `;
 }
 
+// Builds the title card section when the title card is placed in timeline order.
+function renderStoryTitleCard(card, options = {}) {
+  const titleHtml = renderProjectTitleBlock(options);
+  const notesHtml = renderFootnotesForTarget(card.id, options);
+  if (!titleHtml.trim() && !notesHtml.trim()) return "";
+  return `
+    <section class="story-card is-title-story-card" data-card-id="${card.id}">
+      ${titleHtml}
+      ${notesHtml}
+    </section>
+  `;
+}
+
 // Renders footnotes for target UI markup or state.
 function renderFootnotesForTarget(targetId, options = {}) {
   const fields = getActiveStoryFields();
   if (!fields.noteCards) return "";
   const titleCard = getTitleCard();
-  const targetIds = targetId === PROJECT_TARGET_ID && titleCard
+  const targetIds = titleCard && (targetId === PROJECT_TARGET_ID || targetId === titleCard.id)
     ? new Set([PROJECT_TARGET_ID, titleCard.id])
     : new Set([targetId]);
   const notes = card_state.lines
@@ -2667,7 +2684,8 @@ function renderStoryTextPart(tag, field, card, value, options = {}, className = 
 
 // Builds the single timeline storyline ordered by card position.
 function buildStorylines() {
-  const cards = getTimelineStoryCards();
+  const fields = getActiveStoryFields();
+  const cards = getTimelineStoryCards().filter((card) => !isTitleCard(card) || fields.titleCard);
   if (!cards.length) return [];
   return [{
     key: "timeline",
@@ -3051,6 +3069,7 @@ function resetProject() {
   card_state.savedProjectName = "";
   card_state.undoStack = [];
   card_state.redoStack = [];
+  card_state.timelineY = null;
   card_state.pan = { x: 84, y: 72 };
   card_state.zoom = 1;
   card_state.nextCard = 1;
@@ -3092,6 +3111,7 @@ function buildProjectData() {
   const project = {
     version: 6,
     projectName: getProjectName(),
+    timelineY: getTimelineY(),
     cards: card_state.cards.map((card) => ({
       id: card.id,
       type: getCardType(card),
@@ -3128,13 +3148,15 @@ function buildProjectData() {
       mediaPath: card.mediaPath,
       creationIndex: card.creationIndex
     })),
-    lines: card_state.lines.map((line) => ({
-      id: line.id,
-      sourceId: line.sourceId,
-      targetId: line.targetId,
-      color: getLineRenderColor(line),
-      creationIndex: line.creationIndex
-    })),
+    lines: card_state.lines
+      .filter((line) => !isTitleCard(findCard(line.sourceId)))
+      .map((line) => ({
+        id: line.id,
+        sourceId: line.sourceId,
+        targetId: line.targetId,
+        color: getLineRenderColor(line),
+        creationIndex: line.creationIndex
+      })),
     storylineTitles: { ...card_state.storylineTitles },
     characters: [...card_state.characters],
     preferences: { ...card_state.preferences }
@@ -3193,6 +3215,7 @@ function loadProjectFromFile(event) {
 function loadProjectJson(project) {
   card_state.projectName = String(project.projectName || "").trim();
   updateProjectNameDisplay();
+  card_state.timelineY = Number.isFinite(Number(project.timelineY)) ? snap(Number(project.timelineY)) : null;
   const preferences = project.preferences || {};
   card_state.preferences = {
     defaultCardColor: safeHex(preferences.defaultCardColor, card_defaults.color),
@@ -3265,9 +3288,8 @@ function loadProjectJson(project) {
     .filter((line) => {
       const source = findCard(line.sourceId);
       const target = findCard(line.targetId);
-      if (line.targetId === PROJECT_TARGET_ID) return isNoteCard(source);
       if (isTitleCard(source)) return false;
-      if (isTitleCard(target)) return isNoteCard(source);
+      if (line.targetId === PROJECT_TARGET_ID) return isNoteCard(source);
       if (isCharacterCard(source) || isCharacterCard(target)) return isCharacterCard(source) && isCharacterCard(target);
       if (isNoteCard(target)) return isNoteCard(source);
       return true;
@@ -3409,11 +3431,11 @@ async function autoSaveProject() {
 function buildPlainTextStory() {
   const storylines = buildStorylines();
   const fields = getActiveStoryFields();
+  const titleCard = getTitleCard();
+  const titleIsOnTimeline = fields.titleCard && titleCard && cardTouchesTimeline(titleCard);
   const lines = [];
-  if (fields.titleCard) {
-    lines.push(getProjectName(), "");
-    appendPlainProjectMeta(lines);
-    appendPlainNotes(lines, PROJECT_TARGET_ID, fields);
+  if (fields.titleCard && !titleIsOnTimeline) {
+    appendPlainTitleCard(lines, fields);
   }
   if (!storylines.length) {
     if (!lines.length) lines.push("Connect cards to build story.");
@@ -3422,6 +3444,11 @@ function buildPlainTextStory() {
   storylines.forEach((group, index) => {
     if (storylines.length > 1 && fields.act) lines.push(getStorylineTitle(group, index), "");
     group.cards.forEach((card) => {
+      if (isTitleCard(card)) {
+        if (fields.titleCard) appendPlainTitleCard(lines, fields);
+        lines.push("");
+        return;
+      }
       if (fields.header) lines.push(getDisplayCardTitle(card));
       if (fields.location && cardUsesSceneFields(card) && card.fields.slugVisible === true && getSceneSlug(card)) lines.push(getSceneSlug(card));
       if (fields.characters && getCardCharacters(card).length) lines.push(getCardCharacters(card).join(", "));
@@ -3432,6 +3459,13 @@ function buildPlainTextStory() {
     });
   });
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+// Appends the project title block to plain-text story export.
+function appendPlainTitleCard(lines, fields) {
+  lines.push(getProjectName(), "");
+  appendPlainProjectMeta(lines);
+  appendPlainNotes(lines, PROJECT_TARGET_ID, fields);
 }
 
 // Appends title-card metadata to plain-text story export.
@@ -3449,7 +3483,7 @@ function appendPlainProjectMeta(lines) {
 function appendPlainNotes(lines, targetId, fields) {
   if (!fields.noteCards) return;
   const titleCard = getTitleCard();
-  const targetIds = targetId === PROJECT_TARGET_ID && titleCard
+  const targetIds = titleCard && (targetId === PROJECT_TARGET_ID || targetId === titleCard.id)
     ? new Set([PROJECT_TARGET_ID, titleCard.id])
     : new Set([targetId]);
   const notes = card_state.lines
@@ -3870,6 +3904,11 @@ function captureCardPositions() {
 
 // Returns whether a card type belongs to the main story timeline.
 function isTimelineCardType(cardType) {
+  return cardType === TITLE_CARD_TYPE || isAutoTimelineCardType(cardType);
+}
+
+// Returns whether a card type should be created directly on the timeline.
+function isAutoTimelineCardType(cardType) {
   return cardType === "scene" || cardType === "dialog";
 }
 
@@ -3881,6 +3920,11 @@ function isTimelineCard(card) {
 // Returns whether a dragged card is allowed to displace neighboring cards.
 function cardCanDisplaceCards(card) {
   return isTimelineCard(card);
+}
+
+// Returns whether a card uses the timeline as its only story-order connection.
+function isTimelineOrderedStoryCard(card) {
+  return isSceneCard(card) || isDialogCard(card);
 }
 
 // Lets a timeline card follow the pointer freely until the drop snaps it back to the timeline.
@@ -3950,7 +3994,7 @@ function placeCardOffTimeline(card, desiredX, desiredY) {
   return [card];
 }
 
-// Prevents title, note, and character cards from occupying the timeline lane on drop.
+// Prevents non-timeline card types from occupying the timeline lane on drop.
 function keepNonTimelineCardOffTimeline(card, desiredX, desiredY) {
   if (isTimelineCard(card)) return { x: desiredX, y: desiredY };
   const size = getCardSize(card);
@@ -4022,12 +4066,14 @@ function getTimelineY(excludeId = "") {
   if (card_state.pointer?.type === "drag-card" && Number.isFinite(card_state.pointer.timelineY)) {
     return card_state.pointer.timelineY;
   }
+  if (Number.isFinite(card_state.timelineY)) return card_state.timelineY;
   const titleCard = getTitleCard();
   const grid = card_state.preferences.gridSize || card_defaults.gridSize;
   const top = titleCard
     ? titleCard.y + card_sizes.expanded.height + grid
     : screenToWorld(dom.canvasViewport.getBoundingClientRect().left + 120, dom.canvasViewport.getBoundingClientRect().top + 160).y;
-  return snap(top + card_sizes.expanded.height / 2);
+  card_state.timelineY = snap(top + card_sizes.expanded.height / 2);
+  return card_state.timelineY;
 }
 
 // Returns the top coordinate needed to center a card on the timeline.
