@@ -1063,6 +1063,18 @@ function renderCards() {
   if (sizeChanged) renderLines();
 }
 
+// Autosizes card textareas so body fields grow with their contents instead of scrolling internally.
+function autosizeCardTextareas(root = dom.cardsLayer) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll(".card-item:not(.is-compact) textarea").forEach((textarea) => {
+    textarea.style.height = "auto";
+    const minHeight = textarea.classList.contains("dialog-scene-text")
+      ? (textarea.classList.contains("is-empty") ? 42 : 92)
+      : 74;
+    textarea.style.height = `${Math.max(minHeight, textarea.scrollHeight)}px`;
+  });
+}
+
 // Builds the HTML for one card from its current state and type.
 function renderCard(card) {
   const expanded = isCardExpanded(card);
@@ -1083,6 +1095,7 @@ function renderCard(card) {
 
 // Synchronizes expanded card data sizes to their rendered content height.
 function syncRenderedCardSizes() {
+  autosizeCardTextareas();
   if (isMobileMode()) return false;
   let changed = false;
   card_state.cards.forEach((card) => {
@@ -1512,6 +1525,8 @@ function handleCardInput(event) {
     }
   }
   markDirty();
+  autosizeCardTextareas(event.target.closest(".card-item"));
+  if (syncRenderedCardSizes()) renderLines();
   renderStory();
 }
 
@@ -6417,6 +6432,8 @@ function applyBodyMarkup(card, type, color = "") {
   textarea.selectionEnd = nextEnd;
   card_state.textMarkupSelection = null;
   markDirty();
+  autosizeCardTextareas(textarea.closest(".card-item"));
+  if (syncRenderedCardSizes()) renderLines();
   renderStory();
 }
 
