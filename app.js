@@ -5389,6 +5389,9 @@ function resolveOverlapsAfterExpansion(anchorId) {
   const anchor = findCard(anchorId);
   if (!anchor) return;
   const anchorIsTimeline = cardTouchesTimeline(anchor);
+  const ignoredIds = anchorIsTimeline
+    ? new Set()
+    : new Set(card_state.cards.filter(cardTouchesTimeline).map((card) => card.id));
   const orderedCards = card_state.cards
     .filter((card) => card.id !== anchorId)
     .filter((card) => anchorIsTimeline || !cardTouchesTimeline(card))
@@ -5399,10 +5402,10 @@ function resolveOverlapsAfterExpansion(anchorId) {
   for (let pass = 0; pass < maxPasses; pass += 1) {
     let moved = false;
     orderedCards.forEach((card) => {
-      if (!positionOverlaps(card.id, card.x, card.y, getCardSize(card))) return;
+      if (!positionOverlapsIgnoring(card.id, card.x, card.y, getCardSize(card), ignoredIds)) return;
       const position = cardTouchesTimeline(card)
         ? findOpenTimelinePosition(card, card.x, getCardSize(card))
-        : findNonOverlappingPosition(card, card.x, card.y);
+        : findNonOverlappingPositionIgnoring(card, card.x, card.y, getCardSize(card), ignoredIds);
       if (position.x === card.x && position.y === card.y) return;
       card.x = position.x;
       card.y = cardTouchesTimeline(card) ? getTimelineTopForSize(getCardSize(card), card.id) : position.y;
@@ -5446,6 +5449,38 @@ function positionOverlapsIgnoring(cardId, x, y, size, ignoredIds) {
       height: getCardSize(other).height
     }, gap);
   });
+}
+
+// Finds a nearby open position while ignoring a protected set of cards.
+function findNonOverlappingPositionIgnoring(card, desiredX, desiredY, forcedSize, ignoredIds) {
+  const base = {
+    x: snap(desiredX),
+    y: snap(desiredY)
+  };
+  const grid = card_state.preferences.gridSize || card_defaults.gridSize;
+  const size = forcedSize || getCardSize(card);
+  if (!positionOverlapsIgnoring(card?.id, base.x, base.y, size, ignoredIds)) return base;
+
+  const maxRadius = Math.max(8, card_state.cards.length + 4);
+  for (let radius = 1; radius <= maxRadius; radius += 1) {
+    const candidates = [];
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      candidates.push({ x: base.x + dx * grid, y: base.y - radius * grid });
+      candidates.push({ x: base.x + dx * grid, y: base.y + radius * grid });
+    }
+    for (let dy = -radius + 1; dy <= radius - 1; dy += 1) {
+      candidates.push({ x: base.x - radius * grid, y: base.y + dy * grid });
+      candidates.push({ x: base.x + radius * grid, y: base.y + dy * grid });
+    }
+    candidates.sort((a, b) => distance(a, base) - distance(b, base));
+    const open = candidates.find((candidate) => !positionOverlapsIgnoring(card?.id, candidate.x, candidate.y, size, ignoredIds));
+    if (open) return open;
+  }
+
+  return {
+    x: base.x,
+    y: base.y + (maxRadius + 1) * grid
+  };
 }
 
 // Returns whether two rectangles intersect without requiring the grid safety gap.
