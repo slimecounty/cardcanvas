@@ -753,12 +753,19 @@ select:focus-visible {
   min-height: 74px;
   max-height: none;
   overflow: hidden;
+  scrollbar-width: none;
   resize: none;
   padding: 8px;
 }
 
+.card-body textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .card-item:not(.is-compact) .card-body textarea {
   max-height: none;
+  field-sizing: content;
 }
 
 .card-body input:disabled,
@@ -1276,9 +1283,15 @@ select:focus-visible {
   height: auto;
   max-height: none;
   overflow: hidden;
+  scrollbar-width: none;
   padding: 8px 0 5px;
   resize: none;
   line-height: 1.45;
+}
+
+.material-field textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .material-field input::placeholder,
@@ -2237,7 +2250,9 @@ select:focus-visible {
 
   .window-main.is-mobile-card-editing .canvas-viewport {
     height: calc(100dvh - var(--header-h) - 42px - var(--pane-header-h));
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
     cursor: default;
     touch-action: pan-y;
     background-color: #fff;
@@ -2245,10 +2260,15 @@ select:focus-visible {
     -webkit-overflow-scrolling: touch;
   }
 
+  .window-main.is-mobile-card-editing .canvas-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
   .window-main.is-mobile-card-editing .canvas-world {
     position: static;
     width: 100%;
-    height: 100%;
+    height: auto;
     min-height: 100%;
     transform: none !important;
   }
@@ -2256,7 +2276,7 @@ select:focus-visible {
   .window-main.is-mobile-card-editing .cards-layer {
     position: static;
     width: 100%;
-    height: 100%;
+    height: auto;
     min-height: 100%;
   }
 
@@ -2275,29 +2295,34 @@ select:focus-visible {
     position: static;
     left: auto !important;
     top: auto !important;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     min-height: 100%;
-    height: 100%;
+    height: auto;
     border: 0;
     border-radius: 0;
     box-shadow: none;
     cursor: default;
+    overflow: visible;
   }
 
   .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .card-body {
-    min-height: 0;
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
+    flex: 1 0 auto;
+    min-height: auto;
+    overflow: visible;
   }
 
   .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .material-content {
     min-height: 0;
-    height: 100%;
+    height: auto;
   }
 
   .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .material-field-supporting {
     min-height: 0;
+  }
+
+  .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .card-bottom {
+    margin-top: auto;
   }
 }
