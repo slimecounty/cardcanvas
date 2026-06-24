@@ -647,7 +647,7 @@ select:focus-visible {
   top: 0;
 }
 
-/* Card component shell shared by scene, dialog, note, and character cards. */
+/* Card component shell shared by scene, note, title, and character cards. */
 .card-item {
   position: absolute;
   display: grid;
@@ -941,10 +941,6 @@ select:focus-visible {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.card-item.is-dialog-card .material-content {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
 .slug-field {
   display: grid;
   grid-template-columns: 20px 44px minmax(0, 1fr) 54px;
@@ -1011,30 +1007,6 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.dialog-character-list {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  align-items: center;
-  padding: 3px 0;
-}
-
-.dialog-character-list.is-empty {
-  color: #7a858e;
-}
-
-.dialog-character-name {
-  min-height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #1f2a33;
-  font-weight: 650;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
 .character-picker {
   position: absolute;
   top: 36px;
@@ -1083,6 +1055,155 @@ select:focus-visible {
   display: grid;
 }
 
+.material-field-supporting.has-markup-toolbar {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.material-field-supporting.has-dialog-bubbles {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.body-markup-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 8px;
+}
+
+.body-markup-toolbar .icon-button {
+  width: 30px;
+  min-height: 30px;
+}
+
+.dialog-bubble-editor {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 2px 0 8px;
+}
+
+.dialog-scene-text {
+  width: 100%;
+  min-height: 92px;
+}
+
+.dialog-insert-slot {
+  align-self: center;
+  width: 32px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(52, 67, 78, .18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .18);
+  color: rgba(52, 67, 78, .28);
+  cursor: pointer;
+}
+
+.dialog-insert-slot:hover,
+.dialog-insert-slot:focus-visible {
+  background: rgba(25, 103, 210, .08);
+  border-color: rgba(25, 103, 210, .24);
+  color: rgba(25, 103, 210, .5);
+}
+
+.dialog-insert-slot .material-symbols-outlined {
+  font-size: 19px;
+}
+
+.card-body .dialog-bubble-row {
+  position: relative;
+  width: min(78%, 260px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #1f2a33;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.card-body .dialog-bubble-row.is-left {
+  align-self: flex-start;
+}
+
+.card-body .dialog-bubble-row.is-right {
+  align-self: flex-end;
+}
+
+.card-body .dialog-bubble-speaker {
+  padding: 0 8px;
+  color: #34434e;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.card-body .dialog-bubble-card {
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid rgba(45, 60, 72, .12);
+  border-radius: 16px;
+  background: var(--bubble-color, #e6e8eb);
+  color: #1f2a33;
+  box-shadow: 0 1px 1px rgba(20, 31, 40, .08);
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-body .dialog-bubble-card:disabled {
+  cursor: default;
+}
+
+.dialog-bubble-text-display {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.card-body .dialog-bubble-row.is-left .dialog-bubble-card {
+  border-bottom-left-radius: 5px;
+}
+
+.card-body .dialog-bubble-row.is-right .dialog-bubble-card {
+  border-bottom-right-radius: 5px;
+}
+
+.dialog-bubble-delete {
+  position: absolute;
+  top: 19px;
+  right: -12px;
+  width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .5);
+  color: rgba(179, 38, 30, .46);
+  cursor: pointer;
+  opacity: .58;
+}
+
+.dialog-bubble-row.is-right .dialog-bubble-delete {
+  right: auto;
+  left: -12px;
+}
+
+.dialog-bubble-delete:hover,
+.dialog-bubble-delete:focus-visible {
+  color: var(--danger);
+  opacity: .9;
+}
+
+.dialog-bubble-delete .material-symbols-outlined {
+  font-size: 18px;
+}
+
 .material-field input,
 .material-field textarea {
   width: 100%;
@@ -1128,6 +1249,33 @@ select:focus-visible {
   opacity: 1;
 }
 
+.material-field .dialog-scene-text {
+  min-height: 92px;
+  height: auto;
+}
+
+.material-field .dialog-scene-text.is-empty {
+  min-height: 42px;
+}
+
+.material-field .dialog-bubble-card {
+  min-height: 44px;
+  height: auto;
+  padding: 9px 11px;
+  border: 1px solid rgba(45, 60, 72, .12);
+  border-radius: 16px;
+  background: var(--bubble-color, #e6e8eb);
+  box-shadow: 0 1px 1px rgba(20, 31, 40, .08);
+}
+
+.material-field .dialog-bubble-row.is-left .dialog-bubble-card {
+  border-bottom-left-radius: 5px;
+}
+
+.material-field .dialog-bubble-row.is-right .dialog-bubble-card {
+  border-bottom-right-radius: 5px;
+}
+
 .card-bottom {
   min-height: 48px;
   display: grid;
@@ -1155,7 +1303,6 @@ select:focus-visible {
 
 .mobile-add-card,
 .note-add-card,
-.dialog-add-card,
 .lasso-mode-button {
   display: inline-flex;
 }
@@ -1240,18 +1387,15 @@ select:focus-visible {
   grid-column: 6;
 }
 
-.card-item.is-note-card .card-bottom,
-.card-item.is-dialog-card .card-bottom {
+.card-item.is-note-card .card-bottom {
   grid-template-columns: 36px minmax(0, 1fr) repeat(3, 36px);
 }
 
-.card-item.is-note-card .card-copy-button,
-.card-item.is-dialog-card .card-copy-button {
+.card-item.is-note-card .card-copy-button {
   grid-column: 4;
 }
 
-.card-item.is-note-card .card-save-toggle,
-.card-item.is-dialog-card .card-save-toggle {
+.card-item.is-note-card .card-save-toggle {
   grid-column: 5;
 }
 
@@ -1583,16 +1727,33 @@ select:focus-visible {
   font-weight: 400;
 }
 
-.story-card.is-dialog-card .story-dialog-body {
+.story-card.has-dialog-body .story-dialog-body {
   margin-top: 0;
-  padding-left: 56px;
+  padding-left: 112px;
+  text-align: left;
 }
 
-.story-card.is-dialog-card .story-dialog-body strong {
+.story-card.has-dialog-body .story-dialog-body .dialog-speaker {
   display: block;
-  margin: 0 0 0 -56px;
+  margin: 0 0 0 -112px;
+  font-weight: 800;
   line-height: 1.2;
   text-align: center;
+}
+
+.story-card.has-dialog-body .story-dialog-body .dialog-unit {
+  display: block;
+}
+
+.story-card.has-dialog-body .story-dialog-body .dialog-line {
+  display: block;
+  text-align: left;
+}
+
+.story-card.has-dialog-body .story-dialog-body .story-body-line {
+  display: block;
+  margin-left: -112px;
+  text-align: left;
 }
 
 .story-card img {
@@ -1786,6 +1947,16 @@ select:focus-visible {
   place-items: center;
 }
 
+.speech-dialog textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px;
+  border: 1px solid #cbd5dc;
+  border-radius: 6px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 .center-color-input {
   width: 96px;
   height: 56px;
@@ -1949,5 +2120,70 @@ select:focus-visible {
 
   .text-button span {
     display: none;
+  }
+
+  .window-main.is-mobile-card-editing .canvas-viewport {
+    height: calc(100dvh - var(--header-h) - 42px - var(--pane-header-h));
+    overflow: auto;
+    cursor: default;
+    touch-action: pan-y;
+    background-color: #fff;
+    background-image: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .window-main.is-mobile-card-editing .canvas-world {
+    position: static;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    transform: none !important;
+  }
+
+  .window-main.is-mobile-card-editing .cards-layer {
+    position: static;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+  }
+
+  .window-main.is-mobile-card-editing .line-layer,
+  .window-main.is-mobile-card-editing .lasso-rect,
+  .window-main.is-mobile-card-editing .zoom-overlay,
+  .window-main.is-mobile-card-editing .history-overlay {
+    display: none;
+  }
+
+  .window-main.is-mobile-card-editing .card-item {
+    display: none;
+  }
+
+  .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) {
+    position: static;
+    left: auto !important;
+    top: auto !important;
+    display: grid;
+    width: 100%;
+    min-height: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    cursor: default;
+  }
+
+  .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .card-body {
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .material-content {
+    min-height: 0;
+    height: 100%;
+  }
+
+  .window-main.is-mobile-card-editing .card-item.is-selected:not(.is-compact) .material-field-supporting {
+    min-height: 0;
   }
 }

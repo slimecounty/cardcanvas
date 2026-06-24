@@ -62,6 +62,7 @@
           </details>
           <button id="openGridSize" type="button">Grid Size</button>
           <button id="openCharactersDialog" type="button">Manage Characters</button>
+          <label class="menu-check"><input id="editOnOpenToggle" name="editOnOpenToggle" type="checkbox"> Edit Cards On Open</label>
           <button id="prefCardColorButton" type="button">Default Card Color</button>
         </div>
       </div>
@@ -73,8 +74,7 @@
           <button id="jumpToStart" type="button">Jump To Start</button>
           <button id="jumpToEnd" type="button">Jump To End</button>
           <button id="alignTimelineCards" type="button">Align All Cards</button>
-          <button id="expandAllCards" type="button">Expand Cards</button>
-          <button id="compactAllCards" type="button">Collapse Cards</button>
+          <button id="cardViewToggle" type="button">Card View: Collapsed</button>
           <button id="toggleBranding" type="button">Hide Branding</button>
         </div>
       </div>
@@ -103,9 +103,6 @@
           </button>
           <button id="noteAddCard" class="icon-button note-add-card" type="button" title="Add note" aria-label="Add note card">
             <span class="material-symbols-outlined" aria-hidden="true">post_add</span>
-          </button>
-          <button id="dialogAddCard" class="icon-button dialog-add-card" type="button" title="Add dialog" aria-label="Add dialog card">
-            <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
           </button>
           <button id="bulkSelectMode" class="icon-button lasso-mode-button" type="button" title="Switch to lasso mode" aria-label="Switch to lasso mode" aria-pressed="false">
             <span class="material-symbols-outlined icon-grab-mode" aria-hidden="true">crop_free</span>
@@ -220,6 +217,21 @@
       <footer>
         <button class="button" value="cancel" type="submit">Cancel</button>
         <button id="applyColor" class="button" value="default" type="submit">Apply</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="speechDialog" class="app-dialog speech-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2 id="speechDialogTitle">Speech</h2>
+      </header>
+      <div class="dialog-body">
+        <textarea id="speechDialogText" name="speechDialogText" aria-label="Speech text"></textarea>
+      </div>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="saveSpeechDialog" class="button" value="default" type="submit">Save</button>
       </footer>
     </form>
   </dialog>

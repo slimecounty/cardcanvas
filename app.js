@@ -18,6 +18,20 @@ const TITLE_CARD_TYPE = "title";
 
 const SLUG_PREFIXES = ["INT.", "EXT.", "INT./EXT.", "EXT./INT."];
 const SLUG_TIMES = ["DAY", "NIGHT", "CONTINUOUS", "LATER", "MOMENTS LATER", "DAWN", "DUSK"];
+const DIALOG_OPEN_PREFIX = "[[dialog:";
+const DIALOG_CLOSE = "[[/dialog]]";
+const dialog_bubble_palette = [
+  "#e6e8eb",
+  "#b8def8",
+  "#ccefd6",
+  "#e4d7f8",
+  "#fae6a8",
+  "#ffd8c2",
+  "#bdeee7",
+  "#f6c7d7",
+  "#d4ddff",
+  "#dce8c3"
+];
 
 const card_type_flags = {
   title: {
@@ -37,7 +51,7 @@ const card_type_flags = {
     media: true,
     sceneFields: true,
     characters: true,
-    dialogueInsert: false,
+    dialogueInsert: true,
     singleIncoming: true,
     singleOutgoing: true,
     defaultColor: null,
@@ -55,18 +69,6 @@ const card_type_flags = {
     defaultColor: "#f0f7ff",
     arrowColor: "#000000",
     defaultPrefix: "Note"
-  },
-  dialog: {
-    story: true,
-    media: false,
-    sceneFields: false,
-    characters: true,
-    dialogueInsert: true,
-    singleIncoming: true,
-    singleOutgoing: true,
-    defaultColor: "#fff7d6",
-    arrowColor: null,
-    defaultPrefix: "Dialog"
   },
   character: {
     story: false,
@@ -92,7 +94,10 @@ const card_icons = {
   image: materialIcon("image"),
   palette: materialIcon("palette"),
   copy: materialIcon("content_copy"),
-  personAdd: materialIcon("person_add")
+  personAdd: materialIcon("person_add"),
+  bold: materialIcon("format_bold"),
+  italic: materialIcon("format_italic"),
+  textColor: materialIcon("format_color_text")
 };
 
 // Returns Material Symbols icon markup.
@@ -115,7 +120,9 @@ const card_state = {
     autoSaveEnabled: true,
     autoSaveInterval: card_defaults.autoSaveInterval,
     namingPrefix: card_defaults.namingPrefix,
-    namingSequence: card_defaults.namingSequence
+    namingSequence: card_defaults.namingSequence,
+    cardView: "collapsed",
+    editCardsOnOpen: false
   },
   characters: [],
   fileHandle: null,
@@ -153,7 +160,10 @@ const card_state = {
   textPopoutUrl: "",
   prePopoutGridTemplate: "",
   textPopoutWatch: null,
-  characterEditOriginal: ""
+  characterEditOriginal: "",
+  textMarkupSelection: null,
+  activeSupportingInsert: null,
+  speechEditTarget: null
 };
 
 const dom = {};
@@ -189,8 +199,7 @@ function cacheDom() {
   dom.settingsMenuPanel = document.getElementById("settingsMenuPanel");
   dom.prefCardColorButton = document.getElementById("prefCardColorButton");
   dom.openGridSize = document.getElementById("openGridSize");
-  dom.expandAllCards = document.getElementById("expandAllCards");
-  dom.compactAllCards = document.getElementById("compactAllCards");
+  dom.cardViewToggle = document.getElementById("cardViewToggle");
   dom.newProject = document.getElementById("newProject");
   dom.saveProject = document.getElementById("saveProject");
   dom.saveAsProject = document.getElementById("saveAsProject");
@@ -206,8 +215,8 @@ function cacheDom() {
   dom.mobileTextTab = document.getElementById("mobileTextTab");
   dom.mobileAddCard = document.getElementById("mobileAddCard");
   dom.noteAddCard = document.getElementById("noteAddCard");
-  dom.dialogAddCard = document.getElementById("dialogAddCard");
   dom.bulkSelectMode = document.getElementById("bulkSelectMode");
+  dom.editOnOpenToggle = document.getElementById("editOnOpenToggle");
   dom.undoAction = document.getElementById("undoAction");
   dom.redoAction = document.getElementById("redoAction");
   dom.mediaFileInput = document.getElementById("mediaFileInput");
@@ -219,6 +228,10 @@ function cacheDom() {
   dom.colorDialog = document.getElementById("colorDialog");
   dom.centerColorInput = document.getElementById("centerColorInput");
   dom.applyColor = document.getElementById("applyColor");
+  dom.speechDialog = document.getElementById("speechDialog");
+  dom.speechDialogTitle = document.getElementById("speechDialogTitle");
+  dom.speechDialogText = document.getElementById("speechDialogText");
+  dom.saveSpeechDialog = document.getElementById("saveSpeechDialog");
   dom.jumpToStart = document.getElementById("jumpToStart");
   dom.jumpToEnd = document.getElementById("jumpToEnd");
   dom.alignTimelineCards = document.getElementById("alignTimelineCards");
@@ -282,13 +295,9 @@ function bindEvents() {
     closeMenus();
     openCenteredColorPicker("default-card", card_state.preferences.defaultCardColor);
   });
-  dom.expandAllCards.addEventListener("click", () => {
+  dom.cardViewToggle?.addEventListener("click", () => {
     closeMenus();
-    expandAllCards();
-  });
-  dom.compactAllCards.addEventListener("click", () => {
-    closeMenus();
-    compactAllCards();
+    toggleCardViewMode();
   });
   dom.newProject.addEventListener("click", () => {
     closeMenus();
@@ -322,6 +331,7 @@ function bindEvents() {
   dom.mediaFileInput.addEventListener("change", handleMediaFileSelected);
   dom.gridDialog.addEventListener("close", handleGridDialogClose);
   dom.autoSaveToggle.addEventListener("change", handleAutoSaveToggle);
+  dom.editOnOpenToggle?.addEventListener("change", handleEditOnOpenToggle);
   dom.windowMenuPanel.addEventListener("click", handleWindowMenuClick);
   dom.assetsMenuButton.addEventListener("click", (event) => toggleMenu(event, "assets"));
   dom.openCharactersDialog.addEventListener("click", () => {
@@ -381,7 +391,6 @@ function bindEvents() {
   dom.mobileTextTab.addEventListener("click", () => setMobileView("text"));
   dom.mobileAddCard.addEventListener("click", () => createConnectedCardFromButton("scene"));
   dom.noteAddCard.addEventListener("click", () => createConnectedCardFromButton("note"));
-  dom.dialogAddCard.addEventListener("click", () => createConnectedCardFromButton("dialog"));
   dom.bulkSelectMode.addEventListener("click", toggleSelectionTool);
   dom.undoAction.addEventListener("click", undoAction);
   dom.redoAction.addEventListener("click", redoAction);
@@ -395,6 +404,7 @@ function bindEvents() {
   });
   window.addEventListener("resize", handleViewportModeChange);
 
+  dom.canvasViewport.addEventListener("pointerdown", handleCanvasTouchPointerDown, { capture: true });
   dom.canvasViewport.addEventListener("pointerdown", handleCanvasPointerDown);
   dom.canvasViewport.addEventListener("dblclick", handleCanvasDoubleClick);
   dom.canvasViewport.addEventListener("wheel", handleCanvasWheel, { passive: false });
@@ -414,6 +424,11 @@ function bindEvents() {
   dom.storyOutput.addEventListener("click", handleStoryClick);
 
   dom.applyColor.addEventListener("click", applyCenteredColor);
+  dom.saveSpeechDialog.addEventListener("click", saveSpeechDialog);
+  dom.speechDialog.addEventListener("close", () => {
+    card_state.speechEditTarget = null;
+  });
+  dom.speechDialogText.addEventListener("keydown", handleSpeechDialogKeydown);
 
   dom.paneResizer.addEventListener("pointerdown", startPaneResize);
   dom.paneResizer.addEventListener("dblclick", resetPaneResize);
@@ -558,11 +573,25 @@ function setMobileView(view) {
   dom.mobileTextTab.classList.toggle("is-active", card_state.mobileActiveView === "text");
   dom.mobileCardsTab.setAttribute("aria-selected", String(card_state.mobileActiveView !== "text"));
   dom.mobileTextTab.setAttribute("aria-selected", String(card_state.mobileActiveView === "text"));
+  updateMobileCardEditingState();
 }
 
 // Returns whether mobile mode.
 function isMobileMode() {
   return window.matchMedia("(max-width: 820px)").matches;
+}
+
+// Returns the selected expanded card that should occupy the mobile card viewport.
+function getMobileEditingCard() {
+  if (!isMobileMode() || card_state.mobileActiveView === "text") return null;
+  const card = findCard(card_state.selectedCardId);
+  return card && isCardExpanded(card) && card.editable ? card : null;
+}
+
+// Toggles the mobile full-screen card editing layout state.
+function updateMobileCardEditingState() {
+  if (!dom.windowMain) return;
+  dom.windowMain.classList.toggle("is-mobile-card-editing", Boolean(getMobileEditingCard()));
 }
 
 // Handles viewport mode change events and updates related state.
@@ -571,6 +600,7 @@ function handleViewportModeChange() {
     popInTextPane(true);
     dom.windowMain.style.gridTemplateColumns = "";
   }
+  updateMobileCardEditingState();
   updateMenuState();
 }
 
@@ -586,12 +616,18 @@ function syncSettingsMenuState() {
     button.setAttribute("aria-checked", String(Number(button.dataset.autoSaveInterval) === card_state.preferences.autoSaveInterval));
   });
   dom.autoSaveToggle.checked = Boolean(card_state.preferences.autoSaveEnabled);
+  if (dom.editOnOpenToggle) dom.editOnOpenToggle.checked = Boolean(card_state.preferences.editCardsOnOpen);
   syncNamingDialog();
 }
 
 // Synchronizes window menu state UI state from preferences or selection.
 function syncWindowMenuState() {
   dom.toggleBranding.setAttribute("aria-checked", String(Boolean(card_state.preferences.hideBranding)));
+  if (dom.cardViewToggle) {
+    const expanded = shouldCardsStayExpanded();
+    dom.cardViewToggle.textContent = `Card View: ${expanded ? "Expanded" : "Collapsed"}`;
+    dom.cardViewToggle.setAttribute("aria-pressed", String(expanded));
+  }
 }
 
 // Handles settings menu click events and updates related state.
@@ -656,6 +692,15 @@ function handleAutoSaveToggle() {
   syncSettingsMenuState();
   if (!card_state.preferences.autoSaveEnabled) clearAutoSaveTimer();
   else scheduleAutoSave();
+  markDirty();
+  closeMenus();
+}
+
+// Handles edit-on-open preference changes.
+function handleEditOnOpenToggle() {
+  recordHistory();
+  card_state.preferences.editCardsOnOpen = Boolean(dom.editOnOpenToggle.checked);
+  syncSettingsMenuState();
   markDirty();
   closeMenus();
 }
@@ -915,6 +960,7 @@ function renderCanvasTransform() {
 function renderCards() {
   dom.cardsLayer.innerHTML = card_state.cards.map(renderCard).join("");
   dom.cardCount.value = String(card_state.cards.length);
+  updateMobileCardEditingState();
 }
 
 // Builds the HTML for one card from its current state and type.
@@ -1008,9 +1054,7 @@ function renderExpandedCard(card) {
         </div>
         <div class="material-field">
           <input name="${escapeAttr(card.id)}_tagline" aria-label="Tagline" data-field="tagline" value="${escapeAttr(card.fields.tagline)}" placeholder="Tagline"${disabled}>
-        </div>` : `<div class="material-field material-field-supporting">
-          <textarea name="${escapeAttr(card.id)}_body" aria-label="Body" data-field="supporting" placeholder="${escapeAttr(getSupportingPlaceholder(card))}"${disabled}>${escapeHtml(card.fields.supporting)}</textarea>
-        </div>`}
+        </div>` : renderSupportingEditor(card, disabled)}
       </div>
     </div>
     <footer class="card-bottom">
@@ -1028,26 +1072,72 @@ function renderExpandedCard(card) {
   `;
 }
 
-// Builds the character list shown inside scene and dialog cards.
+// Builds body markup controls for expanded editable cards.
+function renderBodyMarkupToolbar(card) {
+  return `
+    <div class="body-markup-toolbar" aria-label="Body markup controls">
+      <button class="icon-button card-control" type="button" data-action="markup-bold" title="Bold" aria-label="Bold selected body text">${card_icons.bold}</button>
+      <button class="icon-button card-control" type="button" data-action="markup-italic" title="Italic" aria-label="Italicize selected body text">${card_icons.italic}</button>
+      <button class="icon-button card-control" type="button" data-action="markup-color" title="Text color" aria-label="Change selected body text color">${card_icons.textColor}</button>
+    </div>
+  `;
+}
+
+// Builds the body editor, switching scene dialog blocks into speech bubbles.
+function renderSupportingEditor(card, disabled) {
+  const isScene = isSceneCard(card);
+  const blocks = parseSupportingBlocks(card.fields.supporting, card);
+  const hasDialog = blocks.some((block) => block.type === "dialog");
+  if (!hasDialog) {
+    return `<div class="material-field material-field-supporting${card.editable && isScene ? " has-markup-toolbar" : ""}">
+      ${card.editable && isScene ? renderBodyMarkupToolbar(card) : ""}
+      <textarea name="${escapeAttr(card.id)}_body" aria-label="Body" data-field="supporting"${disabled}>${escapeHtml(card.fields.supporting)}</textarea>
+    </div>`;
+  }
+  const editorBlocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  return `<div class="material-field material-field-supporting has-dialog-bubbles">
+    ${card.editable && isScene ? renderBodyMarkupToolbar(card) : ""}
+    <div class="dialog-bubble-editor" aria-label="Body dialog bubbles">
+      ${editorBlocks.map((block, index) => renderSupportingBlockEditor(card, block, index, editorBlocks, disabled)).join("")}
+    </div>
+  </div>`;
+}
+
+// Renders one editable text or dialog block inside the card body.
+function renderSupportingBlockEditor(card, block, index, blocks, disabled) {
+  if (block.type !== "dialog") {
+    const active = isActiveSupportingInsert(card.id, index);
+    if (!block.text.trim() && !active) {
+      return card.editable ? `<button class="dialog-insert-slot" type="button" data-action="activate-body-insert" data-block-index="${index}" title="Add text here" aria-label="Add text here">
+        ${materialIcon("add")}
+      </button>` : "";
+    }
+    return `<textarea class="dialog-scene-text${block.text.trim() ? "" : " is-empty"}" name="${escapeAttr(card.id)}_body_block_${index}" aria-label="Body text" data-field="supportingBlock" data-block-index="${index}"${disabled}>${escapeHtml(block.text)}</textarea>`;
+  }
+  const meta = getDialogSpeakerMeta(blocks, block.speaker);
+  const speaker = getDisplayDialogSpeaker(block.speaker);
+  const speechText = block.text.trim() ? formatBodyText(block.text) : "&nbsp;";
+  return `<div class="dialog-bubble-row is-${meta.side}" style="--bubble-color:${escapeAttr(meta.color)}">
+    <span class="dialog-bubble-speaker">${escapeHtml(speaker)}</span>
+    <button class="dialog-bubble-card" type="button" data-action="edit-speech-bubble" data-block-index="${index}" aria-label="Edit ${escapeAttr(speaker)} speech"${disabled}>
+      <span class="dialog-bubble-text-display">${speechText}</span>
+    </button>
+    ${card.editable ? `<button class="dialog-bubble-delete" type="button" data-action="delete-speech-bubble" data-block-index="${index}" title="Delete speech bubble" aria-label="Delete ${escapeAttr(speaker)} speech bubble">
+      ${card_icons.delete}
+    </button>` : ""}
+  </div>`;
+}
+
+// Builds the character list shown inside scene cards.
 function renderCharacterChips(card, disabled) {
   const names = getCardCharacters(card);
-  if (isDialogCard(card)) {
-    if (!names.length) return `<div class="dialog-character-list is-empty">Characters</div>`;
-    return `
-      <div class="dialog-character-list" aria-label="Dialog characters">
-        ${names.map((name) => `<button class="dialog-character-name" type="button" data-character-name="${escapeAttr(name)}" data-action="insert-character-dialogue" title="Double-click to insert dialogue name"${disabled}>${escapeHtml(name)}</button>`).join("")}
-      </div>
-    `;
-  }
   if (!names.length) return `<div class="character-chips is-empty">Characters</div>`;
   return `
     <div class="character-chips" aria-label="Scene characters">
       ${names.map((name) => {
         const action = cardAllowsDialogueInsert(card)
           ? ' data-action="insert-character-dialogue" title="Double-click to insert dialogue name"'
-          : isSceneCard(card)
-            ? ' data-action="remove-character-from-card" title="Double-click to remove character"'
-            : "";
+          : "";
         return `<button class="character-chip" type="button" data-character-name="${escapeAttr(name)}"${action}${disabled}>${escapeHtml(name)}</button>`;
       }).join("")}
     </div>
@@ -1123,16 +1213,12 @@ function handleCardClick(event) {
   }
   if (action === "expand") {
     recordHistory();
-    setCardExpanded(card, true, false);
+    openCard(card);
   }
   if (action === "toggle-edit") {
     recordHistory();
-    if (!isCardExpanded(card)) {
-      setCardExpanded(card, true, true);
-    } else {
-      card.editable = !card.editable;
-      if (!card.editable) card.savedAt = Date.now();
-    }
+    if (card.editable) finishCardEditing(card);
+    else setCardExpanded(card, true, true);
   }
   if (action === "toggle-media") {
     openMediaAction(card);
@@ -1156,6 +1242,30 @@ function handleCardClick(event) {
     renderCards();
     return;
   }
+  if (action === "markup-bold") {
+    applyBodyMarkup(card, "bold");
+    return;
+  }
+  if (action === "markup-italic") {
+    applyBodyMarkup(card, "italic");
+    return;
+  }
+  if (action === "markup-color") {
+    openBodyTextColorPicker(card);
+    return;
+  }
+  if (action === "activate-body-insert") {
+    activateBodyInsert(card, actionButton.dataset.blockIndex);
+    return;
+  }
+  if (action === "edit-speech-bubble") {
+    openSpeechDialog(card, actionButton.dataset.blockIndex);
+    return;
+  }
+  if (action === "delete-speech-bubble") {
+    deleteSpeechBubble(card, actionButton.dataset.blockIndex);
+    return;
+  }
   if (action === "add-character-to-card") {
     addCharacterToCard(card, actionButton.dataset.characterName);
     return;
@@ -1166,10 +1276,6 @@ function handleCardClick(event) {
   }
   if (action === "insert-character-dialogue") {
     if (event.detail >= 2 && cardAllowsDialogueInsert(card)) insertCharacterDialogueName(card, actionButton.dataset.characterName);
-    return;
-  }
-  if (action === "remove-character-from-card") {
-    if (event.detail >= 2 && isSceneCard(card)) removeCharacterFromCard(card, actionButton.dataset.characterName);
     return;
   }
   if (action === "delete") {
@@ -1190,7 +1296,9 @@ function handleCardInput(event) {
   if (field === "slugVisible" && event.type === "input") return;
 
   recordHistory();
-  if (field === "mediaPath") {
+  if (field === "supportingBlock") {
+    updateSupportingBlockFromInput(card, event.target);
+  } else if (field === "mediaPath") {
     card.mediaPath = event.target.value;
     card.localMediaUrl = "";
   } else if (field === "slugVisible") {
@@ -1306,18 +1414,37 @@ function markCardDoubleClick(event) {
   };
 }
 
-// Supports expand card for editing.
-function expandCardForEditing(card) {
-  setCardExpanded(card, true, false);
+// Opens a card, optionally entering edit mode based on user preference.
+function openCard(card) {
+  setCardExpanded(card, true, Boolean(card_state.preferences.editCardsOnOpen));
   selectCard(card.id);
   card_state.raisedCardId = card.id;
   renderAll();
   requestAnimationFrame(() => focusCard(card.id, { focusTitle: false }));
 }
 
+// Supports expand card for editing.
+function expandCardForEditing(card) {
+  openCard(card);
+}
+
 // Opens card color picker.
 function openCardColorPicker(card) {
   openCenteredColorPicker("card", card.color, card.id);
+}
+
+// Opens the shared centered color picker for selected body text.
+function openBodyTextColorPicker(card) {
+  if (!card?.editable) return;
+  const textarea = getCardBodyTextarea(card.id);
+  if (!textarea) return;
+  card_state.textMarkupSelection = {
+    cardId: card.id,
+    blockIndex: textarea.dataset.blockIndex ?? "",
+    start: textarea.selectionStart ?? textarea.value.length,
+    end: textarea.selectionEnd ?? textarea.selectionStart ?? textarea.value.length
+  };
+  openCenteredColorPicker("text-color", "#000000", card.id);
 }
 
 // Opens centered color picker.
@@ -1333,10 +1460,15 @@ function openCenteredColorPicker(targetType, value, cardId = "") {
 function applyCenteredColor(event) {
   event.preventDefault();
   const color = safeHex(dom.centerColorInput.value, card_defaults.color);
-  recordHistory();
   if (dom.colorDialog.dataset.targetType === "default-card") {
+    recordHistory();
     card_state.preferences.defaultCardColor = color;
+  } else if (dom.colorDialog.dataset.targetType === "text-color") {
+    const card = findCard(dom.colorDialog.dataset.cardId);
+    if (!card) return;
+    applyBodyMarkup(card, "color", color);
   } else {
+    recordHistory();
     const card = findCard(dom.colorDialog.dataset.cardId);
     if (!card) return;
     card.color = color;
@@ -1354,6 +1486,11 @@ function handleCardPointerDown(event) {
 
   if (connectButton && card) {
     startCardConnection(event, card);
+    return;
+  }
+
+  if (isMobileMode() && card && isCardExpanded(card) && card.editable) {
+    selectCard(card.id);
     return;
   }
 
@@ -1403,10 +1540,7 @@ function handleCardPointerDown(event) {
       const activeCard = findCard(card.id);
       if (!activePointer || activePointer.type !== "drag-card" || activePointer.cardId !== card.id || !activeCard) return;
       activePointer.longPressTriggered = true;
-      setCardExpanded(activeCard, true, false);
-      selectCard(activeCard.id);
-      renderAll();
-      requestAnimationFrame(() => focusCard(activeCard.id, { focusTitle: false }));
+      openCard(activeCard);
     }, 560);
   }
   attachPointerListeners();
@@ -1433,10 +1567,7 @@ function handleCompactCardDoublePress(event, card) {
   if (!isDoublePress) return false;
   card_state.lastCardPress = null;
   markCardDoubleClick(event);
-  setCardExpanded(card, true, false);
-  selectCard(card.id);
-  renderAll();
-  requestAnimationFrame(() => focusCard(card.id, { focusTitle: false }));
+  openCard(card);
   return true;
 }
 
@@ -1460,6 +1591,40 @@ function startCardConnection(event, card) {
   renderLines();
 }
 
+// Tracks touch pointers across the whole card viewport so pinch zoom can start over cards or grid.
+function handleCanvasTouchPointerDown(event) {
+  if (event.pointerType !== "touch" || !isCanvasTouchGestureTarget(event.target)) return;
+  card_state.touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (card_state.touchPoints.size < 2) return;
+  event.preventDefault();
+  event.stopPropagation();
+  beginPinchGesture();
+}
+
+// Returns whether a touch target should participate in canvas pinch gestures.
+function isCanvasTouchGestureTarget(target) {
+  return Boolean(target.closest("#canvasViewport")) &&
+    !target.closest(".zoom-overlay, .history-overlay, button, input, textarea, select, dialog, .menu-panel");
+}
+
+// Starts or restarts a pinch zoom gesture from the current active touch points.
+function beginPinchGesture() {
+  const points = [...card_state.touchPoints.values()].slice(0, 2);
+  if (points.length < 2) return;
+  const startDistance = Math.max(1, distance(points[0], points[1]));
+  const midpoint = midpointOf(points[0], points[1]);
+  clearLongPressTimer(card_state.pointer);
+  hideLassoRect();
+  dom.canvasViewport.classList.remove("is-panning");
+  card_state.pointer = {
+    type: "pinch",
+    startDistance,
+    startZoom: card_state.zoom,
+    startWorld: screenToWorld(midpoint.x, midpoint.y)
+  };
+  attachPointerListeners();
+}
+
 // Handles canvas pointer down events and updates related state.
 function handleCanvasPointerDown(event) {
   if (event.button !== 0 || !isCanvasGridTarget(event.target)) return;
@@ -1473,15 +1638,7 @@ function handleCanvasPointerDown(event) {
   if (event.pointerType === "touch") {
     card_state.touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (card_state.touchPoints.size === 2) {
-      const points = [...card_state.touchPoints.values()];
-      const midpoint = midpointOf(points[0], points[1]);
-      card_state.pointer = {
-        type: "pinch",
-        startDistance: distance(points[0], points[1]),
-        startZoom: card_state.zoom,
-        startWorld: screenToWorld(midpoint.x, midpoint.y)
-      };
-      attachPointerListeners();
+      beginPinchGesture();
       return;
     }
   }
@@ -1799,14 +1956,17 @@ function handlePointerUp(event) {
   }
 
   if (pointer.type === "pinch" && card_state.touchPoints.size < 2) {
+    card_state.touchPoints.clear();
     clearPointer();
   }
 }
 
 // Clears pointer.
 function clearPointer() {
+  const pointer = card_state.pointer;
   clearLongPressTimer();
   hideLassoRect();
+  if (pointer?.type === "pinch") card_state.touchPoints.clear();
   card_state.pointer = null;
   dom.canvasViewport.classList.remove("is-panning");
   detachPointerListeners();
@@ -1841,7 +2001,8 @@ function createCardAt(x, y, options = {}) {
   if (cardType === TITLE_CARD_TYPE && getTitleCard()) return getTitleCard();
   if (!options.skipHistory) recordHistory();
   const cardNumber = getNextCardTitleIndex(cardType);
-  const size = { ...card_sizes.expanded };
+  const expanded = Boolean(options.editable) || shouldCardsStayExpanded();
+  const size = { ...(expanded ? card_sizes.expanded : card_sizes.compact) };
   const position = isAutoTimelineCardType(cardType)
     ? findOpenTimelinePosition(null, x, size)
     : findNonOverlappingPosition(null, x, y, size);
@@ -1851,7 +2012,7 @@ function createCardAt(x, y, options = {}) {
     x: position.x,
     y: position.y,
     size,
-    expanded: true,
+    expanded,
     editable: Boolean(options.editable),
     color: getDefaultCardColorForType(cardType),
     fields: {
@@ -1880,6 +2041,7 @@ function createCardAt(x, y, options = {}) {
     card.showMediaPicker = false;
   }
   card_state.cards.push(card);
+  if (card.editable) clearOtherEditModes(card.id);
   if (!options.skipDirty) markDirty();
   if (options.quiet) return card;
   selectCard(card.id);
@@ -2018,7 +2180,8 @@ function copyCard(cardId) {
     localMediaUrl: sourceSupportsMedia ? source.localMediaUrl : ""
   });
   card.color = source.color;
-  card.expanded = source.expanded;
+  card.expanded = shouldCardsStayExpanded();
+  card.size = { ...(card.expanded ? card_sizes.expanded : card_sizes.compact) };
   card.editable = false;
   card.showMediaPicker = Boolean(source.showMediaPicker) && cardSupportsMedia(card);
   if (!(isTimelineCard(source) && isTimelineCard(card))) createLine(source.id, card.id);
@@ -2092,22 +2255,70 @@ function updateCardSelectionClasses() {
     el.classList.toggle("is-selected", isSelected);
     el.classList.toggle("is-raised", isSelected || el.dataset.cardId === card_state.raisedCardId);
   });
+  updateMobileCardEditingState();
 }
 
-// Supports expand all cards.
-function expandAllCards() {
+// Returns whether cards should remain expanded outside edit mode.
+function shouldCardsStayExpanded() {
+  return card_state.preferences.cardView === "expanded";
+}
+
+// Toggles the global card view between expanded and collapsed.
+function toggleCardViewMode() {
+  setCardViewMode(shouldCardsStayExpanded() ? "collapsed" : "expanded");
+}
+
+// Applies the global card view mode to all cards not currently in edit mode.
+function setCardViewMode(mode) {
   recordHistory();
-  card_state.cards.forEach((card) => setCardExpanded(card, true, card.editable));
+  card_state.preferences.cardView = mode === "expanded" ? "expanded" : "collapsed";
+  const expanded = shouldCardsStayExpanded();
+  card_state.cards.forEach((card) => {
+    if (card.editable) return;
+    setCardExpanded(card, expanded, false);
+  });
+  syncWindowMenuState();
   markDirty();
   renderAll();
 }
 
-// Supports compact all cards.
-function compactAllCards() {
-  recordHistory();
-  card_state.cards.forEach((card) => setCardExpanded(card, false, false));
-  markDirty();
-  renderAll();
+// Clears edit mode on every card except the optional active card.
+function clearOtherEditModes(activeCardId = "") {
+  card_state.cards.forEach((card) => {
+    if (card.id === activeCardId) return;
+    if (!card.editable) return;
+    const wasOnTimeline = cardTouchesTimeline(card);
+    card.editable = false;
+    if (!shouldCardsStayExpanded()) {
+      card.expanded = false;
+      card.size = { ...card_sizes.compact };
+    }
+    card.x = snap(card.x);
+    card.y = wasOnTimeline ? getTimelineTopForSize(card.size, card.id) : snap(card.y);
+  });
+}
+
+// Ends edit mode on a card and applies the current global card view mode.
+function finishCardEditing(card) {
+  card.editable = false;
+  card.savedAt = Date.now();
+  setCardExpanded(card, shouldCardsStayExpanded(), false);
+}
+
+// Normalizes expanded/editable flags after load or preference changes.
+function normalizeCardViewState() {
+  const editableCards = card_state.cards
+    .filter((card) => card.editable)
+    .sort((a, b) => a.creationIndex - b.creationIndex);
+  const editableId = editableCards[0]?.id || "";
+  card_state.cards.forEach((card) => {
+    const wasOnTimeline = cardTouchesTimeline(card);
+    const editable = card.id === editableId;
+    card.editable = editable;
+    card.expanded = editable || shouldCardsStayExpanded();
+    card.size = { ...(card.expanded ? card_sizes.expanded : card_sizes.compact) };
+    if (wasOnTimeline) card.y = getTimelineTopForSize(card.size, card.id);
+  });
 }
 
 // Sets card expanded.
@@ -2115,6 +2326,7 @@ function setCardExpanded(card, expanded, editable) {
   const shouldExpand = expanded;
   const wasExpanded = Boolean(card.expanded);
   const wasOnTimeline = cardTouchesTimeline(card);
+  if (editable) clearOtherEditModes(card.id);
   card.expanded = shouldExpand;
   card.editable = Boolean(editable);
   card.size = { ...(shouldExpand ? card_sizes.expanded : card_sizes.compact) };
@@ -2548,7 +2760,7 @@ function getStoryBodyHtml(storylines = buildStorylines(), options = {}) {
   const titleIsOnTimeline = fields.titleCard && titleCard && cardTouchesTimeline(titleCard);
   const projectTitle = fields.titleCard && !titleIsOnTimeline ? renderProjectTitleBlock(options) : "";
   const projectNotes = fields.titleCard && !titleIsOnTimeline ? renderFootnotesForTarget(PROJECT_TARGET_ID, options) : "";
-  const emptyStory = projectTitle || projectNotes ? "" : '<div class="empty-story">Place scene or dialog cards on the timeline to build story.</div>';
+  const emptyStory = projectTitle || projectNotes ? "" : '<div class="empty-story">Place scene cards on the timeline to build story.</div>';
   return storylines.length
     ? `${projectTitle}${projectNotes}${storylines.map((group, index) => renderStoryline(group, index, storylines.length > 1 && fields.act, options)).join("")}`
     : `${projectTitle}${projectNotes}${emptyStory}`;
@@ -2606,14 +2818,14 @@ function renderStoryCard(card, options = {}) {
   if (isTitleCard(card)) return fields.titleCard ? renderStoryTitleCard(card, options) : "";
   const mediaPath = options.exportImages ? exportMediaPath(card.mediaPath) : getMediaPreviewSource(card);
   const characters = getCardCharacters(card).join(", ");
-  const dialogCard = isDialogCard(card);
+  const hasDialog = hasDialogBlocks(card.fields.supporting, card);
   const parts = [
     fields.media && cardSupportsMedia(card) && mediaPath ? `<img src="${escapeAttr(mediaPath)}" alt="">` : "",
     fields.header ? renderStoryTextPart("h2", "header", card, getDisplayCardTitle(card), options) : "",
     fields.location && cardUsesSceneFields(card) && card.fields.slugVisible === true && getSceneSlug(card) ? renderStoryTextPart("h3", "location", card, getSceneSlug(card), options, "story-slug") : "",
     fields.characters && characters ? renderStoryTextPart("p", "characters", card, characters, options, "story-characters") : "",
     fields.notes && cardUsesSceneFields(card) && card.fields.notes ? renderStoryTextPart("h3", "notes", card, card.fields.notes, options) : "",
-    fields.supporting && card.fields.supporting ? renderStoryTextPart("p", "supporting", card, card.fields.supporting, options, dialogCard ? "story-dialog-body" : "") : ""
+    fields.supporting && card.fields.supporting ? renderStoryTextPart(hasDialog ? "div" : "p", "supporting", card, card.fields.supporting, options, hasDialog ? "story-dialog-body" : "") : ""
   ].filter(Boolean);
   if (!parts.length) return "";
   const actions = options.liveEditing
@@ -2623,7 +2835,7 @@ function renderStoryCard(card, options = {}) {
       </div>`
     : "";
   return `
-    <section class="story-card${dialogCard ? " is-dialog-card" : ""}" data-card-id="${card.id}">
+    <section class="story-card${hasDialog ? " has-dialog-body" : ""}" data-card-id="${card.id}">
       ${actions}
       ${parts.join("")}
       ${renderFootnotesForTarget(card.id, options)}
@@ -2678,7 +2890,11 @@ function renderStoryTextPart(tag, field, card, value, options = {}, className = 
   const attrs = options.liveEditing
     ? ` class="${["story-editable", className].filter(Boolean).join(" ")}" data-story-edit="${field}" data-card-id="${escapeAttr(card.id)}" title="Double-click or long-press to edit"`
     : className ? ` class="${className}"` : "";
-  const content = field === "supporting" ? formatBodyText(value) : escapeHtml(value);
+  const content = field === "supporting" && className.includes("story-dialog-body")
+    ? formatDialogBodyText(value, card)
+    : field === "supporting"
+      ? formatBodyText(value)
+      : escapeHtml(value);
   return `<${tag}${attrs}>${content}</${tag}>`;
 }
 
@@ -3226,7 +3442,9 @@ function loadProjectJson(project) {
     autoSaveEnabled: preferences.autoSaveEnabled !== false,
     autoSaveInterval: Number(preferences.autoSaveInterval) || card_defaults.autoSaveInterval,
     namingPrefix: normalizeNamingPrefix(preferences.namingPrefix || card_defaults.namingPrefix),
-    namingSequence: preferences.namingSequence === "letter" ? "letter" : "number"
+    namingSequence: preferences.namingSequence === "letter" ? "letter" : "number",
+    cardView: preferences.cardView === "expanded" ? "expanded" : "collapsed",
+    editCardsOnOpen: Boolean(preferences.editCardsOnOpen)
   };
   card_state.characters = Array.isArray(project.characters)
     ? [...new Set(project.characters.map((name) => String(name || "").trim()).filter(Boolean))]
@@ -3240,7 +3458,8 @@ function loadProjectJson(project) {
   card_state.cards = (project.cards || []).map((raw, index) => {
     const expanded = raw.state?.expanded ?? raw.expanded ?? true;
     const size = raw.size || (expanded ? card_sizes.expanded : card_sizes.compact);
-    const cardType = normalizeCardType(raw.type);
+    const rawType = String(raw.type || "");
+    const cardType = normalizeCardType(rawType);
     const titleIndex = Number(raw.titleIndex) || index + 1;
     return {
       id: String(raw.id || `card_${index + 1}`).startsWith("card_") ? String(raw.id || `card_${index + 1}`) : `card_${raw.id}`,
@@ -3281,6 +3500,7 @@ function loadProjectJson(project) {
   card_state.nextCardCreation = Math.max(0, ...card_state.cards.map((card) => card.creationIndex)) + 1;
   normalizeTitleCards();
   ensureTitleCard({ skipDirty: true });
+  normalizeCardViewState();
 
   const cardIds = new Set(card_state.cards.map((card) => card.id));
   card_state.lines = (project.lines || [])
@@ -3453,7 +3673,7 @@ function buildPlainTextStory() {
       if (fields.location && cardUsesSceneFields(card) && card.fields.slugVisible === true && getSceneSlug(card)) lines.push(getSceneSlug(card));
       if (fields.characters && getCardCharacters(card).length) lines.push(getCardCharacters(card).join(", "));
       if (fields.notes && cardUsesSceneFields(card) && card.fields.notes) lines.push(card.fields.notes);
-      if (fields.supporting && card.fields.supporting) lines.push(plainBodyText(card.fields.supporting));
+      if (fields.supporting && card.fields.supporting) lines.push(hasDialogBlocks(card.fields.supporting, card) ? plainDialogBodyText(card.fields.supporting, card) : plainBodyText(card.fields.supporting));
       appendPlainNotes(lines, card.id, fields);
       lines.push("");
     });
@@ -3637,8 +3857,11 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
     .story-card .story-slug{color:#1f2a33;font-weight:800;text-transform:uppercase;}
     .story-card p{margin:10px 0 0;color:#1f2a33;font-size:12pt;font-weight:400;line-height:1.2;text-align:left;}
     .story-card .story-characters{color:#1f2a33;font-size:12pt;font-weight:400;}
-    .story-card.is-dialog-card .story-dialog-body{margin-top:0;padding-left:56px;}
-    .story-card.is-dialog-card .story-dialog-body strong{display:block;margin:0 0 0 -56px;line-height:1.2;text-align:center;}
+    .story-card.has-dialog-body .story-dialog-body{margin-top:0;padding-left:112px;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body .dialog-speaker{display:block;margin:0 0 0 -112px;font-weight:800;line-height:1.2;text-align:center;}
+    .story-card.has-dialog-body .story-dialog-body .dialog-unit{display:block;}
+    .story-card.has-dialog-body .story-dialog-body .dialog-line{display:block;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body .story-body-line{display:block;margin-left:-112px;text-align:left;}
     .story-card img{display:block;width:100%;max-height:320px;margin:0 0 28px;object-fit:cover;border-radius:0;border:0;}
     .story-footnotes{margin-top:12px;display:grid;gap:8px;}
     .story-note{padding-left:56px;overflow-wrap:anywhere;word-break:break-word;}
@@ -3909,7 +4132,7 @@ function isTimelineCardType(cardType) {
 
 // Returns whether a card type should be created directly on the timeline.
 function isAutoTimelineCardType(cardType) {
-  return cardType === "scene" || cardType === "dialog";
+  return cardType === "scene";
 }
 
 // Returns whether a card belongs to the main story timeline.
@@ -3924,7 +4147,7 @@ function cardCanDisplaceCards(card) {
 
 // Returns whether a card uses the timeline as its only story-order connection.
 function isTimelineOrderedStoryCard(card) {
-  return isSceneCard(card) || isDialogCard(card);
+  return isSceneCard(card);
 }
 
 // Lets a timeline card follow the pointer freely until the drop snaps it back to the timeline.
@@ -3987,7 +4210,7 @@ function placeCardWithoutNudge(card, desiredX, desiredY) {
   return [card];
 }
 
-// Places a scene or dialog card away from the timeline without connecting it to story order.
+// Places a story card away from the timeline without connecting it to story order.
 function placeCardOffTimeline(card, desiredX, desiredY) {
   card.x = snap(desiredX);
   card.y = snap(desiredY);
@@ -4523,11 +4746,6 @@ function isSceneCard(card) {
   return getCardType(card) === "scene";
 }
 
-// Returns whether dialog card.
-function isDialogCard(card) {
-  return getCardType(card) === "dialog";
-}
-
 // Returns whether character card.
 function isCharacterCard(card) {
   return getCardType(card) === "character";
@@ -4555,7 +4773,7 @@ function cardAllowsDialogueInsert(card) {
 
 // Supports card can add characters.
 function cardCanAddCharacters(card) {
-  return cardUsesCharacters(card) && !(isDialogCard(card) && Boolean(card.incomingCardId));
+  return cardUsesCharacters(card);
 }
 
 // Supports card appears in storyline.
@@ -4658,9 +4876,6 @@ function getStoredCardCharacters(card) {
 
 // Returns card characters.
 function getCardCharacters(card) {
-  if (isDialogCard(card) && card?.incomingCardId) {
-    return getCardCharacters(findCard(card.incomingCardId));
-  }
   return getStoredCardCharacters(card);
 }
 
@@ -4746,24 +4961,347 @@ function removeCharacterFromCard(card, name) {
   renderAll();
 }
 
+// Returns whether body text contains dialog blocks.
+function hasDialogBlocks(value, card) {
+  return parseSupportingBlocks(value, card).some((block) => block.type === "dialog");
+}
+
+// Parses card body text into plain text and dialog blocks.
+function parseSupportingBlocks(value, card) {
+  const text = String(value || "");
+  const blocks = text.includes(DIALOG_OPEN_PREFIX)
+    ? parseStructuredDialogBlocks(text)
+    : parseLegacyDialogBlocks(text, card);
+  return normalizeSupportingBlocks(blocks);
+}
+
+// Adds editable text slots around dialog blocks for the mixed scene/dialog card editor.
+function getSupportingEditorBlocks(value, card) {
+  const blocks = parseSupportingBlocks(value, card);
+  if (!blocks.some((block) => block.type === "dialog")) return blocks;
+  const editorBlocks = [];
+  blocks.forEach((block, index) => {
+    if (block.type === "dialog") {
+      if (!editorBlocks.length || editorBlocks[editorBlocks.length - 1].type !== "text") {
+        editorBlocks.push({ type: "text", text: "" });
+      }
+      editorBlocks.push({ ...block });
+      const next = blocks[index + 1];
+      if (!next || next.type !== "text") editorBlocks.push({ type: "text", text: "" });
+      return;
+    }
+    editorBlocks.push({ type: "text", text: block.text });
+  });
+  if (!editorBlocks.length || editorBlocks[editorBlocks.length - 1].type !== "text") {
+    editorBlocks.push({ type: "text", text: "" });
+  }
+  return editorBlocks;
+}
+
+// Parses the current structured dialog block format.
+function parseStructuredDialogBlocks(text) {
+  const blocks = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf(DIALOG_OPEN_PREFIX, cursor);
+    if (start < 0) {
+      blocks.push({ type: "text", text: text.slice(cursor) });
+      break;
+    }
+    if (start > cursor) {
+      const textBlock = text.slice(cursor, start);
+      blocks.push({ type: "text", text: textBlock.endsWith("\n") ? textBlock.slice(0, -1) : textBlock });
+    }
+    const speakerEnd = text.indexOf("]]", start);
+    if (speakerEnd < 0) {
+      blocks.push({ type: "text", text: text.slice(start) });
+      break;
+    }
+    const speaker = sanitizeDialogSpeaker(text.slice(start + DIALOG_OPEN_PREFIX.length, speakerEnd));
+    let bodyStart = speakerEnd + 2;
+    if (text[bodyStart] === "\n") bodyStart += 1;
+    const close = text.indexOf(DIALOG_CLOSE, bodyStart);
+    if (close < 0) {
+      blocks.push({ type: "text", text: text.slice(start) });
+      break;
+    }
+    let dialogText = text.slice(bodyStart, close);
+    if (dialogText.endsWith("\n")) dialogText = dialogText.slice(0, -1);
+    blocks.push({ type: "dialog", speaker, text: dialogText });
+    cursor = close + DIALOG_CLOSE.length;
+    if (text[cursor] === "\n") cursor += 1;
+  }
+  return blocks;
+}
+
+// Parses older body text where a line containing **Character** begins dialog.
+function parseLegacyDialogBlocks(text, card) {
+  const characterNames = new Set(getCardCharacters(card));
+  const lines = text.split("\n");
+  const blocks = [];
+  let textLines = [];
+  let dialogBlock = null;
+  const flushText = () => {
+    if (!textLines.length) return;
+    blocks.push({ type: "text", text: textLines.join("\n") });
+    textLines = [];
+  };
+  const flushDialog = () => {
+    if (!dialogBlock) return;
+    blocks.push(dialogBlock);
+    dialogBlock = null;
+  };
+
+  lines.forEach((line) => {
+    const speakerMatch = line.match(/^\s*\*\*([^*]+)\*\*\s*$/);
+    const speaker = speakerMatch ? sanitizeDialogSpeaker(speakerMatch[1]) : "";
+    const isSpeaker = speaker && (!characterNames.size || characterNames.has(speaker));
+    if (isSpeaker) {
+      flushDialog();
+      flushText();
+      dialogBlock = { type: "dialog", speaker, text: "" };
+      return;
+    }
+    if (dialogBlock) {
+      dialogBlock.text += `${dialogBlock.text ? "\n" : ""}${line}`;
+    } else {
+      textLines.push(line);
+    }
+  });
+  flushDialog();
+  flushText();
+  return blocks;
+}
+
+// Normalizes adjacent body text blocks and removes unusable dialog speakers.
+function normalizeSupportingBlocks(blocks) {
+  const normalized = [];
+  blocks.forEach((block) => {
+    if (!block) return;
+    if (block.type === "dialog") {
+      const speaker = sanitizeDialogSpeaker(block.speaker);
+      if (!speaker) return;
+      normalized.push({ type: "dialog", speaker, text: String(block.text || "") });
+      return;
+    }
+    const text = String(block.text || "");
+    if (!normalized.length || normalized[normalized.length - 1].type !== "text") {
+      normalized.push({ type: "text", text });
+    } else {
+      normalized[normalized.length - 1].text += text;
+    }
+  });
+  return normalized.length ? normalized : [{ type: "text", text: "" }];
+}
+
+// Serializes body text and dialog blocks for saving in the card body field.
+function serializeSupportingBlocks(blocks) {
+  return normalizeSupportingBlocks(blocks)
+    .filter((block) => block.type === "dialog" || block.text.length)
+    .map((block) => {
+      if (block.type !== "dialog") return block.text;
+      return `${DIALOG_OPEN_PREFIX}${sanitizeDialogSpeaker(block.speaker)}]]\n${String(block.text || "")}\n${DIALOG_CLOSE}`;
+    })
+    .join("\n");
+}
+
+// Removes marker-breaking characters from dialog speaker names.
+function sanitizeDialogSpeaker(name) {
+  return String(name || "").replace(/[\]\r\n]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Returns the rendered speaker label without changing the stored character name.
+function getDisplayDialogSpeaker(name) {
+  return sanitizeDialogSpeaker(name).toLocaleUpperCase();
+}
+
+// Updates one parsed body block from a custom editor input.
+function updateSupportingBlockFromInput(card, input) {
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  const index = Number(input.dataset.blockIndex);
+  if (!Number.isInteger(index) || !blocks[index]) return;
+  blocks[index].text = input.value;
+  card.fields.supporting = serializeSupportingBlocks(blocks);
+  if (input.value.trim() && isActiveSupportingInsert(card.id, index)) {
+    card_state.activeSupportingInsert = null;
+  }
+}
+
+// Returns whether a body insertion slot is currently active.
+function isActiveSupportingInsert(cardId, index) {
+  return card_state.activeSupportingInsert?.cardId === cardId
+    && Number(card_state.activeSupportingInsert.index) === Number(index);
+}
+
+// Activates a body insertion slot and focuses its new text input.
+function activateBodyInsert(card, indexValue) {
+  if (!card?.editable) return;
+  const index = Number(indexValue);
+  if (!Number.isInteger(index)) return;
+  card_state.activeSupportingInsert = { cardId: card.id, index };
+  renderCards();
+  requestAnimationFrame(() => {
+    const input = document.querySelector(`#${CSS.escape(card.id)} .dialog-scene-text[data-block-index="${index}"]`);
+    input?.focus();
+  });
+}
+
+// Returns the active insertion index for a card, or null when none is active.
+function getActiveSupportingInsertIndex(card, blocks) {
+  const active = card_state.activeSupportingInsert;
+  if (!active || active.cardId !== card.id) return null;
+  const index = Number(active.index);
+  return Number.isInteger(index) && index >= 0 && index <= blocks.length ? index : null;
+}
+
+// Opens the speech editor dialog for a rendered speech bubble.
+function openSpeechDialog(card, indexValue) {
+  if (!card?.editable) return;
+  const index = Number(indexValue);
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  const block = blocks[index];
+  if (!Number.isInteger(index) || block?.type !== "dialog") return;
+  card_state.speechEditTarget = { cardId: card.id, index };
+  dom.speechDialogTitle.textContent = getDisplayDialogSpeaker(block.speaker);
+  dom.speechDialogText.value = block.text || "";
+  dom.speechDialog.showModal();
+  requestAnimationFrame(() => dom.speechDialogText.focus());
+}
+
+// Saves speech text from the popup dialog back to the card body blocks.
+function saveSpeechDialog(event) {
+  event.preventDefault();
+  const target = card_state.speechEditTarget;
+  const card = findCard(target?.cardId);
+  if (!card) return;
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  const block = blocks[Number(target.index)];
+  if (!block || block.type !== "dialog") return;
+  recordHistory();
+  block.text = dom.speechDialogText.value;
+  card.fields.supporting = serializeSupportingBlocks(blocks);
+  dom.speechDialog.close();
+  card_state.speechEditTarget = null;
+  markDirty();
+  renderAll();
+}
+
+// Saves the speech dialog when Enter is pressed, while Shift+Enter keeps multiline entry.
+function handleSpeechDialogKeydown(event) {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  saveSpeechDialog(event);
+}
+
+// Removes one speech bubble from the card body block list.
+function deleteSpeechBubble(card, indexValue) {
+  if (!card?.editable) return;
+  const index = Number(indexValue);
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  if (!Number.isInteger(index) || blocks[index]?.type !== "dialog") return;
+  recordHistory();
+  blocks.splice(index, 1);
+  card.fields.supporting = serializeSupportingBlocks(blocks);
+  card_state.activeSupportingInsert = null;
+  markDirty();
+  renderAll();
+}
+
+// Returns consistent side and color assignment for a speaker in one card body.
+function getDialogSpeakerMeta(blocks, speaker) {
+  const speakers = [];
+  blocks.forEach((block) => {
+    if (block.type !== "dialog") return;
+    if (!speakers.includes(block.speaker)) speakers.push(block.speaker);
+  });
+  const index = Math.max(0, speakers.indexOf(speaker));
+  return {
+    side: index % 2 === 0 ? "left" : "right",
+    color: dialog_bubble_palette[index % dialog_bubble_palette.length]
+  };
+}
+
+// Returns the body textarea for a specific card if it is currently rendered.
+function getCardBodyTextarea(cardId) {
+  const cardSelector = `#${CSS.escape(cardId)}`;
+  const focused = document.activeElement?.matches?.(`${cardSelector} .dialog-scene-text`)
+    ? document.activeElement
+    : null;
+  return focused || document.querySelector(`${cardSelector} textarea[data-field="supporting"], ${cardSelector} .dialog-scene-text`);
+}
+
+// Applies lightweight markup around the selected body text.
+function applyBodyMarkup(card, type, color = "") {
+  if (!card?.editable) return;
+  const savedSelection = type === "color" && card_state.textMarkupSelection?.cardId === card.id
+    ? card_state.textMarkupSelection
+    : null;
+  const savedBlockSelector = savedSelection?.blockIndex !== ""
+    ? `#${CSS.escape(card.id)} textarea[data-block-index="${CSS.escape(String(savedSelection.blockIndex))}"]`
+    : "";
+  const textarea = savedBlockSelector
+    ? document.querySelector(savedBlockSelector) || getCardBodyTextarea(card.id)
+    : getCardBodyTextarea(card.id);
+  if (!textarea) return;
+  const start = savedSelection?.start ?? textarea.selectionStart ?? textarea.value.length;
+  const end = savedSelection?.end ?? textarea.selectionEnd ?? start;
+  const before = textarea.value.slice(0, start);
+  const selected = textarea.value.slice(start, end);
+  const after = textarea.value.slice(end);
+  let open = "";
+  let close = "";
+  if (type === "bold") {
+    open = "**";
+    close = "**";
+  } else if (type === "italic") {
+    open = "*";
+    close = "*";
+  } else if (type === "color") {
+    open = `[color:${safeHex(color, "#000000")}]`;
+    close = "[/color]";
+  } else {
+    return;
+  }
+  recordHistory();
+  const nextValue = `${before}${open}${selected}${close}${after}`;
+  textarea.value = nextValue;
+  if (textarea.dataset.field === "supportingBlock") {
+    updateSupportingBlockFromInput(card, textarea);
+  } else {
+    card.fields.supporting = nextValue;
+  }
+  textarea.focus();
+  textarea.selectionStart = start + open.length;
+  textarea.selectionEnd = start + open.length + selected.length;
+  card_state.textMarkupSelection = null;
+  markDirty();
+  renderStory();
+}
+
 // Supports insert character dialogue name.
 function insertCharacterDialogueName(card, name) {
   if (!cardAllowsDialogueInsert(card)) return;
   const characterName = String(name || "").trim();
   if (!characterName) return;
-  const textarea = document.querySelector(`#${CSS.escape(card.id)} textarea[data-field="supporting"]`);
-  if (!textarea) return;
   recordHistory();
-  const insertion = `\n**${characterName}**\n`;
-  const start = textarea.selectionStart ?? textarea.value.length;
-  const end = textarea.selectionEnd ?? start;
-  const nextValue = `${textarea.value.slice(0, start)}${insertion}${textarea.value.slice(end)}`;
-  card.fields.supporting = nextValue;
-  textarea.value = nextValue;
-  textarea.focus();
-  textarea.selectionStart = textarea.selectionEnd = start + insertion.length;
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  const activeIndex = getActiveSupportingInsertIndex(card, blocks);
+  const insertIndex = activeIndex ?? (blocks[blocks.length - 1]?.type === "text" && !blocks[blocks.length - 1].text.trim() ? blocks.length - 1 : blocks.length);
+  blocks.splice(insertIndex, 0, { type: "dialog", speaker: characterName, text: "" });
+  card.fields.supporting = serializeSupportingBlocks(blocks);
+  card_state.activeSupportingInsert = null;
   markDirty();
-  renderStory();
+  renderAll();
+  requestAnimationFrame(() => {
+    const updatedBlocks = getSupportingEditorBlocks(card.fields.supporting, card);
+    let dialogIndex = updatedBlocks.findIndex((block, index) => (
+      index >= insertIndex && block.type === "dialog" && block.speaker === characterName && !block.text
+    ));
+    if (dialogIndex < 0) {
+      dialogIndex = updatedBlocks.findIndex((block) => block.type === "dialog" && block.speaker === characterName && !block.text);
+    }
+    openSpeechDialog(card, dialogIndex);
+  });
 }
 
 // Opens characters dialog.
@@ -5037,12 +5575,57 @@ function formatMultiline(value) {
 
 // Supports format body text.
 function formatBodyText(value) {
-  return formatMultiline(value).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  return applyInlineBodyMarkup(formatMultiline(value));
+}
+
+// Formats dialog-mode body text with centered speaker names and indented speech.
+function formatDialogBodyText(value, card) {
+  return parseSupportingBlocks(value, card)
+    .map((block) => {
+      if (block.type !== "dialog") {
+        if (!block.text.trim()) return "";
+        return `<span class="story-body-line dialog-text-block">${formatBodyText(block.text)}</span>`;
+      }
+      const speech = String(block.text || "")
+        .split("\n")
+        .map((line) => (line.trim()
+          ? `<span class="dialog-line">${applyInlineBodyMarkup(escapeHtml(line))}</span>`
+          : '<span class="dialog-line dialog-blank-line">&nbsp;</span>'))
+        .join("");
+      return `<span class="dialog-unit"><strong class="dialog-speaker">${escapeHtml(getDisplayDialogSpeaker(block.speaker))}</strong>${speech}</span>`;
+    })
+    .join("");
+}
+
+// Applies supported body markup after text has already been escaped.
+function applyInlineBodyMarkup(html) {
+  return html
+    .replace(/\[color:(#[0-9a-fA-F]{6})\]([\s\S]*?)\[\/color\]/g, '<span style="color:$1">$2</span>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*<][^*]*?)\*/g, "$1<em>$2</em>");
 }
 
 // Supports plain body text.
 function plainBodyText(value) {
-  return String(value || "").replace(/\*\*([^*]+)\*\*/g, "$1");
+  return String(value || "")
+    .replace(/\[color:#[0-9a-fA-F]{6}\]([\s\S]*?)\[\/color\]/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1$2");
+}
+
+// Returns plain body text indented for dialog-mode scene cards.
+function plainDialogBodyText(value, card) {
+  return parseSupportingBlocks(value, card)
+    .map((block) => {
+      if (block.type !== "dialog") return plainBodyText(block.text);
+      const speech = plainBodyText(block.text)
+        .split("\n")
+        .map((line) => (line.trim() ? `        ${line}` : ""))
+        .join("\n");
+      return `${getDisplayDialogSpeaker(block.speaker)}${speech ? `\n${speech}` : ""}`;
+    })
+    .filter((part) => part.trim())
+    .join("\n");
 }
 
 // Supports clamp.
