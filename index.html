@@ -22,6 +22,7 @@
           <button id="saveAsProject" type="button">Save Project As</button>
           <button id="exportHtml" type="button">Export Project as HTML</button>
           <button id="exportText" type="button">Export Project as Text</button>
+          <button id="exportPdf" type="button">Generate PDF</button>
           <button id="exportCharacterReport" type="button">Export Character Report</button>
           <details class="menu-submenu">
             <summary>Export Scene Report</summary>
@@ -41,11 +42,6 @@
             <button type="button" data-setting-card-med="image">Image</button>
           </details>
           <details class="menu-submenu">
-            <summary>New Card Axis</summary>
-            <button type="button" data-setting-axis="x">X Axis</button>
-            <button type="button" data-setting-axis="y">Y Axis</button>
-          </details>
-          <details class="menu-submenu">
             <summary>Naming Scheme</summary>
             <button id="openNamingScheme" type="button">
               <span class="material-symbols-outlined" aria-hidden="true">text_fields</span>
@@ -54,7 +50,7 @@
           </details>
           <details class="menu-submenu">
             <summary>Auto-Save</summary>
-            <label class="menu-check"><input id="autoSaveToggle" name="autoSaveToggle" type="checkbox" checked> Enabled</label>
+            <button id="autoSaveToggle" class="menu-state-button" type="button" aria-pressed="false">Auto-Save: OFF</button>
             <button type="button" data-auto-save-interval="60000">60 Seconds</button>
             <button type="button" data-auto-save-interval="300000">5 Minutes</button>
             <button type="button" data-auto-save-interval="600000">10 Minutes</button>
@@ -62,13 +58,14 @@
           </details>
           <button id="openGridSize" type="button">Grid Size</button>
           <button id="openCharactersDialog" type="button">Manage Characters</button>
-          <label class="menu-check"><input id="editOnOpenToggle" name="editOnOpenToggle" type="checkbox"> Edit Cards On Open</label>
+          <button id="editOnOpenToggle" class="menu-state-button" type="button" aria-pressed="false">Edit Cards On Open: OFF</button>
           <button id="prefCardColorButton" type="button">Default Card Color</button>
         </div>
       </div>
       <div class="file-menu window-menu">
-        <button id="windowMenuButton" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">Window</button>
+        <button id="windowMenuButton" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">View</button>
         <div id="windowMenuPanel" class="menu-panel" hidden>
+          <button id="toggleOutputRender" class="menu-state-button" type="button" aria-pressed="true">Show Output Render: ON</button>
           <button id="windowPopout" type="button">Pop Out Story</button>
           <button id="windowPopin" type="button" disabled>Pop In Story</button>
           <button id="jumpToStart" type="button">Jump To Start</button>
@@ -161,15 +158,18 @@
               <label class="menu-check"><input name="storyFieldAct" type="checkbox" data-story-field="act"> ACT</label>
               <label class="menu-check"><input name="storyFieldLocation" type="checkbox" data-story-field="location" checked> Location</label>
               <label class="menu-check"><input name="storyFieldCharacters" type="checkbox" data-story-field="characters"> Characters</label>
-              <label class="menu-check"><input name="storyFieldNotes" type="checkbox" data-story-field="notes" checked> Notes</label>
               <label class="menu-check"><input name="storyFieldNoteCards" type="checkbox" data-story-field="noteCards" checked> Note Cards</label>
               <label class="menu-check"><input name="storyFieldMedia" type="checkbox" data-story-field="media" checked> Media</label>
               <label class="menu-check"><input name="storyFieldSupporting" type="checkbox" data-story-field="supporting" checked> Body</label>
+              <label class="menu-check"><input name="storyFieldPageNumbers" type="checkbox" data-story-field="pageNumbers" checked> Page Numbers</label>
               <label class="menu-check"><input name="storyFieldTitleCard" type="checkbox" data-story-field="titleCard"> Title Card</label>
             </div>
           </div>
           <button id="textPopout" class="icon-button" type="button" title="Pop out story" aria-label="Pop out story">
             <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+          </button>
+          <button id="closeStoryRender" class="icon-button" type="button" title="Hide output render" aria-label="Hide output render">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
         </div>
       </header>
@@ -227,6 +227,15 @@
         <h2 id="speechDialogTitle">Speech</h2>
       </header>
       <div class="dialog-body">
+        <label class="form-row">
+          <span>Extension</span>
+          <select id="speechExtension" name="speechExtension" aria-label="Character extension">
+            <option value="">None</option>
+            <option value="V.O.">V.O.</option>
+            <option value="O.S.">O.S.</option>
+            <option value="CONT'D">CONT'D</option>
+          </select>
+        </label>
         <textarea id="speechDialogText" name="speechDialogText" aria-label="Speech text"></textarea>
       </div>
       <footer>
@@ -291,9 +300,9 @@
   <dialog id="deleteDialog" class="app-dialog">
     <form method="dialog" class="dialog-card dialog-card-small">
       <header>
-        <h2>Delete card?</h2>
+        <h2 id="deleteDialogTitle">Delete card?</h2>
       </header>
-      <p>Connected lines for this card will also be removed.</p>
+      <p id="deleteDialogMessage">Connected lines for this card will also be removed.</p>
       <footer>
         <button class="button" value="cancel" type="submit">Cancel</button>
         <button id="confirmDelete" class="button button-danger" value="delete" type="submit">Delete</button>
@@ -308,13 +317,13 @@
       </header>
       <div class="dialog-body">
         <div class="character-entry-row">
-          <button id="addCharacter" class="icon-button" type="button" title="Add character" aria-label="Add character">
-            <span class="material-symbols-outlined" aria-hidden="true">add</span>
-          </button>
           <button id="copyCharacter" class="icon-button" type="button" title="Copy selected character" aria-label="Copy selected character">
             <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
           </button>
           <input id="characterNameInput" type="text" autocomplete="off" placeholder="Name" aria-label="Character name">
+          <button id="addCharacter" class="icon-button" type="button" title="Add character" aria-label="Add character">
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
           <button id="deleteCharacter" class="icon-button button-danger character-delete-button" type="button" title="Delete selected character" aria-label="Delete selected character" hidden>
             <span class="material-symbols-outlined" aria-hidden="true">delete</span>
           </button>
@@ -324,6 +333,32 @@
       <footer>
         <button class="button" value="cancel" type="submit">Cancel</button>
         <button class="button" value="default" type="submit">Done</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="characterDeleteDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Delete character?</h2>
+      </header>
+      <p>Are you sure you want to DELETE this character?</p>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="confirmCharacterDelete" class="button button-danger" value="delete" type="submit">Delete</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="bubbleDeleteDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card dialog-card-small">
+      <header>
+        <h2>Delete speech?</h2>
+      </header>
+      <p>Delete this speech bubble?</p>
+      <footer>
+        <button class="button" value="cancel" type="submit">Cancel</button>
+        <button id="confirmBubbleDelete" class="button button-danger" value="delete" type="submit">Delete</button>
       </footer>
     </form>
   </dialog>

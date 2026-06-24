@@ -13,11 +13,16 @@ const card_defaults = {
   namingSequence: "number"
 };
 
+const DEFAULT_PROJECT_PATH = "night-of-the-living-dead-1968.json";
 const PROJECT_TARGET_ID = "project_title";
 const TITLE_CARD_TYPE = "title";
 
 const SLUG_PREFIXES = ["INT.", "EXT.", "INT./EXT.", "EXT./INT."];
 const SLUG_TIMES = ["DAY", "NIGHT", "CONTINUOUS", "LATER", "MOMENTS LATER", "DAWN", "DUSK"];
+const SCENE_TRANSITIONS = ["", "CUT TO:", "DISSOLVE TO:", "SMASH TO:", "MATCH CUT TO:", "FADE IN:", "FADE OUT:", "TIME CUT TO:"];
+const CUSTOM_SELECT_VALUE = "CUSTOM";
+const CARD_ACTS = ["", ...Array.from({ length: 12 }, (_, index) => `ACT ${String(index + 1).padStart(2, "0")}`)];
+const SPEECH_EXTENSIONS = ["", "V.O.", "O.S.", "CONT'D"];
 const DIALOG_OPEN_PREFIX = "[[dialog:";
 const DIALOG_CLOSE = "[[/dialog]]";
 const dialog_bubble_palette = [
@@ -95,9 +100,14 @@ const card_icons = {
   palette: materialIcon("palette"),
   copy: materialIcon("content_copy"),
   personAdd: materialIcon("person_add"),
+  textTools: materialIcon("abc"),
   bold: materialIcon("format_bold"),
   italic: materialIcon("format_italic"),
-  textColor: materialIcon("format_color_text")
+  textColor: materialIcon("format_color_text"),
+  tab: materialIcon("keyboard_tab"),
+  alignLeft: materialIcon("format_align_left"),
+  alignCenter: materialIcon("format_align_center"),
+  alignRight: materialIcon("format_align_right")
 };
 
 // Returns Material Symbols icon markup.
@@ -114,15 +124,15 @@ const card_state = {
   preferences: {
     defaultCardColor: card_defaults.color,
     cardMedPref: "text",
-    newCardAxis: "x",
     gridSize: card_defaults.gridSize,
     hideBranding: false,
-    autoSaveEnabled: true,
+    autoSaveEnabled: false,
     autoSaveInterval: card_defaults.autoSaveInterval,
     namingPrefix: card_defaults.namingPrefix,
     namingSequence: card_defaults.namingSequence,
     cardView: "collapsed",
-    editCardsOnOpen: false
+    editCardsOnOpen: false,
+    showOutputRender: true
   },
   characters: [],
   fileHandle: null,
@@ -134,7 +144,6 @@ const card_state = {
   redoStack: [],
   restoringHistory: false,
   timelineY: null,
-  storylineTitles: {},
   pan: { x: 84, y: 72 },
   zoom: 1,
   nextCard: 1,
@@ -160,20 +169,27 @@ const card_state = {
   textPopoutUrl: "",
   prePopoutGridTemplate: "",
   textPopoutWatch: null,
+  storyPaginationHandle: null,
+  storyPaginationHandleType: "",
   characterEditOriginal: "",
   textMarkupSelection: null,
   activeSupportingInsert: null,
-  speechEditTarget: null
+  speechEditTarget: null,
+  pendingCharacterDeleteName: "",
+  pendingBubbleDelete: null
 };
 
 const dom = {};
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   cacheDom();
   bindEvents();
-  loadInspirations();
-  ensureTitleCard({ skipDirty: true, select: true });
-  renderAll();
+  await loadInspirations();
+  const loadedDefault = await loadDefaultProject();
+  if (!loadedDefault) {
+    ensureTitleCard({ skipDirty: true, select: true });
+    renderAll();
+  }
 });
 
 // Caches static DOM nodes used by the app.
@@ -200,12 +216,14 @@ function cacheDom() {
   dom.prefCardColorButton = document.getElementById("prefCardColorButton");
   dom.openGridSize = document.getElementById("openGridSize");
   dom.cardViewToggle = document.getElementById("cardViewToggle");
+  dom.toggleOutputRender = document.getElementById("toggleOutputRender");
   dom.newProject = document.getElementById("newProject");
   dom.saveProject = document.getElementById("saveProject");
   dom.saveAsProject = document.getElementById("saveAsProject");
   dom.loadProject = document.getElementById("loadProject");
   dom.exportHtml = document.getElementById("exportHtml");
   dom.exportText = document.getElementById("exportText");
+  dom.exportPdf = document.getElementById("exportPdf");
   dom.exportCharacterReport = document.getElementById("exportCharacterReport");
   dom.projectFileInput = document.getElementById("projectFileInput");
   dom.projectNameInput = document.getElementById("projectNameInput");
@@ -230,8 +248,11 @@ function cacheDom() {
   dom.applyColor = document.getElementById("applyColor");
   dom.speechDialog = document.getElementById("speechDialog");
   dom.speechDialogTitle = document.getElementById("speechDialogTitle");
+  dom.speechExtension = document.getElementById("speechExtension");
   dom.speechDialogText = document.getElementById("speechDialogText");
   dom.saveSpeechDialog = document.getElementById("saveSpeechDialog");
+  dom.deleteDialogTitle = document.getElementById("deleteDialogTitle");
+  dom.deleteDialogMessage = document.getElementById("deleteDialogMessage");
   dom.jumpToStart = document.getElementById("jumpToStart");
   dom.jumpToEnd = document.getElementById("jumpToEnd");
   dom.alignTimelineCards = document.getElementById("alignTimelineCards");
@@ -246,6 +267,10 @@ function cacheDom() {
   dom.addCharacter = document.getElementById("addCharacter");
   dom.copyCharacter = document.getElementById("copyCharacter");
   dom.deleteCharacter = document.getElementById("deleteCharacter");
+  dom.characterDeleteDialog = document.getElementById("characterDeleteDialog");
+  dom.confirmCharacterDelete = document.getElementById("confirmCharacterDelete");
+  dom.bubbleDeleteDialog = document.getElementById("bubbleDeleteDialog");
+  dom.confirmBubbleDelete = document.getElementById("confirmBubbleDelete");
   dom.mediaDialog = document.getElementById("mediaDialog");
   dom.newProjectDialog = document.getElementById("newProjectDialog");
   dom.discardNewProject = document.getElementById("discardNewProject");
@@ -257,6 +282,7 @@ function cacheDom() {
   dom.zoomIn = document.getElementById("zoomIn");
   dom.zoomOut = document.getElementById("zoomOut");
   dom.textPopout = document.getElementById("textPopout");
+  dom.closeStoryRender = document.getElementById("closeStoryRender");
   dom.windowPopout = document.getElementById("windowPopout");
   dom.windowPopin = document.getElementById("windowPopin");
 }
@@ -323,6 +349,10 @@ function bindEvents() {
     closeMenus();
     exportWindowTextPlain();
   });
+  dom.exportPdf.addEventListener("click", () => {
+    closeMenus();
+    exportWindowTextPdf();
+  });
   dom.exportCharacterReport.addEventListener("click", () => {
     closeMenus();
     exportCharacterReport();
@@ -330,8 +360,8 @@ function bindEvents() {
   dom.projectFileInput.addEventListener("change", loadProjectFromFile);
   dom.mediaFileInput.addEventListener("change", handleMediaFileSelected);
   dom.gridDialog.addEventListener("close", handleGridDialogClose);
-  dom.autoSaveToggle.addEventListener("change", handleAutoSaveToggle);
-  dom.editOnOpenToggle?.addEventListener("change", handleEditOnOpenToggle);
+  dom.autoSaveToggle.addEventListener("click", handleAutoSaveToggle);
+  dom.editOnOpenToggle?.addEventListener("click", handleEditOnOpenToggle);
   dom.windowMenuPanel.addEventListener("click", handleWindowMenuClick);
   dom.assetsMenuButton.addEventListener("click", (event) => toggleMenu(event, "assets"));
   dom.openCharactersDialog.addEventListener("click", () => {
@@ -340,11 +370,13 @@ function bindEvents() {
   });
   dom.addCharacter.addEventListener("click", addCharacterFromDialog);
   dom.copyCharacter.addEventListener("click", copySelectedCharacter);
-  dom.deleteCharacter.addEventListener("click", deleteSelectedCharacter);
+  dom.deleteCharacter.addEventListener("click", requestSelectedCharacterDelete);
   dom.characterList.addEventListener("change", syncCharacterDialogSelection);
   dom.characterList.addEventListener("input", syncCharacterDialogSelection);
+  dom.characterList.addEventListener("dblclick", jumpToSelectedCharacterCard);
   dom.characterNameInput.addEventListener("keydown", handleCharacterNameKeydown);
-  dom.charactersDialog.addEventListener("close", () => commitCharacterNameEdit());
+  dom.charactersDialog.addEventListener("close", handleCharactersDialogClose);
+  dom.confirmCharacterDelete.addEventListener("click", confirmCharacterDelete);
 
   dom.confirmDelete.addEventListener("click", (event) => {
     event.preventDefault();
@@ -367,6 +399,11 @@ function bindEvents() {
   dom.zoomIn.addEventListener("click", () => zoomCanvasBy(1.14));
   dom.zoomOut.addEventListener("click", () => zoomCanvasBy(1 / 1.14));
   dom.textPopout.addEventListener("click", popOutTextPane);
+  dom.closeStoryRender.addEventListener("click", () => {
+    recordHistory();
+    setOutputRenderVisible(false);
+    markDirty();
+  });
   dom.windowPopout.addEventListener("click", () => {
     closeMenus();
     popOutTextPane();
@@ -410,6 +447,7 @@ function bindEvents() {
   dom.canvasViewport.addEventListener("wheel", handleCanvasWheel, { passive: false });
 
   dom.cardsLayer.addEventListener("pointerdown", handleCardPointerDown);
+  dom.cardsLayer.addEventListener("pointerdown", preserveBodyMarkupSelection, true);
   dom.cardsLayer.addEventListener("click", handleCardClick);
   dom.cardsLayer.addEventListener("input", handleCardInput);
   dom.cardsLayer.addEventListener("change", handleCardChange);
@@ -425,6 +463,7 @@ function bindEvents() {
 
   dom.applyColor.addEventListener("click", applyCenteredColor);
   dom.saveSpeechDialog.addEventListener("click", saveSpeechDialog);
+  dom.confirmBubbleDelete.addEventListener("click", confirmBubbleDelete);
   dom.speechDialog.addEventListener("close", () => {
     card_state.speechEditTarget = null;
   });
@@ -467,6 +506,22 @@ async function loadInspirations() {
       .map((line) => line.replace(/^["']|["']$/g, ""));
   } catch {
     card_state.inspirations = [];
+  }
+}
+
+// Loads the bundled example project on startup when the app is served over HTTP.
+async function loadDefaultProject() {
+  if (window.location.protocol === "file:") return false;
+  try {
+    const response = await fetch(DEFAULT_PROJECT_PATH);
+    if (!response.ok) return false;
+    loadProjectJson(await response.json(), { selectTitle: true });
+    card_state.fileHandle = null;
+    card_state.savedProjectName = normalizedProjectName(getProjectName());
+    return true;
+  } catch (error) {
+    console.warn("Default project could not be loaded", error);
+    return false;
   }
 }
 
@@ -566,6 +621,7 @@ function handleDocumentPointerDown(event) {
 
 // Sets mobile view.
 function setMobileView(view) {
+  if (view === "text" && !shouldShowOutputRender()) view = "cards";
   card_state.mobileActiveView = view === "text" ? "text" : "cards";
   dom.windowMain.classList.toggle("mobile-show-text", card_state.mobileActiveView === "text");
   dom.windowMain.classList.toggle("mobile-show-cards", card_state.mobileActiveView !== "text");
@@ -574,6 +630,31 @@ function setMobileView(view) {
   dom.mobileCardsTab.setAttribute("aria-selected", String(card_state.mobileActiveView !== "text"));
   dom.mobileTextTab.setAttribute("aria-selected", String(card_state.mobileActiveView === "text"));
   updateMobileCardEditingState();
+}
+
+// Returns whether the generated story output pane should be visible.
+function shouldShowOutputRender() {
+  return card_state.preferences.showOutputRender !== false;
+}
+
+// Applies the generated story output pane visibility preference.
+function applyOutputRenderPreference() {
+  const visible = shouldShowOutputRender();
+  dom.windowMain?.classList.toggle("is-output-hidden", !visible);
+  if (dom.mobileTextTab) dom.mobileTextTab.disabled = !visible;
+  if (!visible) {
+    if (card_state.mobileActiveView === "text") setMobileView("cards");
+    if (card_state.textPopoutWindow && !card_state.textPopoutWindow.closed) popInTextPane(true);
+  }
+  syncWindowMenuState();
+}
+
+// Sets whether the generated story output pane is visible.
+function setOutputRenderVisible(visible) {
+  card_state.preferences.showOutputRender = Boolean(visible);
+  applyOutputRenderPreference();
+  renderStory();
+  updateMenuState();
 }
 
 // Returns whether mobile mode.
@@ -609,20 +690,30 @@ function syncSettingsMenuState() {
   dom.settingsMenuPanel.querySelectorAll("[data-setting-card-med]").forEach((button) => {
     button.setAttribute("aria-checked", String(button.dataset.settingCardMed === card_state.preferences.cardMedPref));
   });
-  dom.settingsMenuPanel.querySelectorAll("[data-setting-axis]").forEach((button) => {
-    button.setAttribute("aria-checked", String(button.dataset.settingAxis === getNewCardAxis()));
-  });
   dom.settingsMenuPanel.querySelectorAll("[data-auto-save-interval]").forEach((button) => {
     button.setAttribute("aria-checked", String(Number(button.dataset.autoSaveInterval) === card_state.preferences.autoSaveInterval));
   });
-  dom.autoSaveToggle.checked = Boolean(card_state.preferences.autoSaveEnabled);
-  if (dom.editOnOpenToggle) dom.editOnOpenToggle.checked = Boolean(card_state.preferences.editCardsOnOpen);
+  if (dom.autoSaveToggle) {
+    const enabled = Boolean(card_state.preferences.autoSaveEnabled);
+    dom.autoSaveToggle.textContent = `Auto-Save: ${enabled ? "ON" : "OFF"}`;
+    dom.autoSaveToggle.setAttribute("aria-pressed", String(enabled));
+  }
+  if (dom.editOnOpenToggle) {
+    const enabled = Boolean(card_state.preferences.editCardsOnOpen);
+    dom.editOnOpenToggle.textContent = `Edit Cards On Open: ${enabled ? "ON" : "OFF"}`;
+    dom.editOnOpenToggle.setAttribute("aria-pressed", String(enabled));
+  }
   syncNamingDialog();
 }
 
 // Synchronizes window menu state UI state from preferences or selection.
 function syncWindowMenuState() {
   dom.toggleBranding.setAttribute("aria-checked", String(Boolean(card_state.preferences.hideBranding)));
+  if (dom.toggleOutputRender) {
+    const visible = shouldShowOutputRender();
+    dom.toggleOutputRender.textContent = `Show Output Render: ${visible ? "ON" : "OFF"}`;
+    dom.toggleOutputRender.setAttribute("aria-pressed", String(visible));
+  }
   if (dom.cardViewToggle) {
     const expanded = shouldCardsStayExpanded();
     dom.cardViewToggle.textContent = `Card View: ${expanded ? "Expanded" : "Collapsed"}`;
@@ -639,17 +730,6 @@ function handleSettingsMenuClick(event) {
     syncSettingsMenuState();
     markDirty();
     renderAll();
-    closeMenus();
-    return;
-  }
-
-  const axisButton = event.target.closest("[data-setting-axis]");
-  if (axisButton) {
-    recordHistory();
-    card_state.preferences.newCardAxis = axisButton.dataset.settingAxis === "y" ? "y" : "x";
-    syncSettingsMenuState();
-    markDirty();
-    renderStory();
     closeMenus();
     return;
   }
@@ -675,6 +755,13 @@ function handleFileMenuClick(event) {
 
 // Handles window menu click events and updates related state.
 function handleWindowMenuClick(event) {
+  if (event.target.closest("#toggleOutputRender")) {
+    recordHistory();
+    setOutputRenderVisible(!shouldShowOutputRender());
+    markDirty();
+    closeMenus();
+    return;
+  }
   if (event.target.closest("#toggleBranding")) {
     recordHistory();
     card_state.preferences.hideBranding = !card_state.preferences.hideBranding;
@@ -686,9 +773,20 @@ function handleWindowMenuClick(event) {
 }
 
 // Handles auto save toggle events and updates related state.
-function handleAutoSaveToggle() {
+async function handleAutoSaveToggle() {
   recordHistory();
-  card_state.preferences.autoSaveEnabled = dom.autoSaveToggle.checked;
+  const enabled = !card_state.preferences.autoSaveEnabled;
+  if (enabled && (!card_state.fileHandle || card_state.savedProjectName !== normalizedProjectName(getProjectName()))) {
+    const saved = await saveProjectJson({ saveAs: true });
+    if (!saved) {
+      card_state.preferences.autoSaveEnabled = false;
+      syncSettingsMenuState();
+      markDirty();
+      closeMenus();
+      return;
+    }
+  }
+  card_state.preferences.autoSaveEnabled = enabled;
   syncSettingsMenuState();
   if (!card_state.preferences.autoSaveEnabled) clearAutoSaveTimer();
   else scheduleAutoSave();
@@ -699,7 +797,7 @@ function handleAutoSaveToggle() {
 // Handles edit-on-open preference changes.
 function handleEditOnOpenToggle() {
   recordHistory();
-  card_state.preferences.editCardsOnOpen = Boolean(dom.editOnOpenToggle.checked);
+  card_state.preferences.editCardsOnOpen = !card_state.preferences.editCardsOnOpen;
   syncSettingsMenuState();
   markDirty();
   closeMenus();
@@ -801,6 +899,7 @@ function centerCanvasOnCard(card) {
 function renderAll() {
   ensureTitleCard({ skipDirty: true });
   refreshConnectionFlags();
+  applyOutputRenderPreference();
   renderCanvasTransform();
   renderCards();
   renderLines();
@@ -839,7 +938,8 @@ function markSaved() {
 function updateMenuState() {
   if (dom.undoAction) dom.undoAction.disabled = !card_state.undoStack.length;
   if (dom.redoAction) dom.redoAction.disabled = !card_state.redoStack.length;
-  const popoutUnavailable = isMobileMode() || window.location.protocol === "file:";
+  applyOutputRenderPreference();
+  const popoutUnavailable = !shouldShowOutputRender() || isMobileMode() || window.location.protocol === "file:";
   if (dom.windowPopout) dom.windowPopout.disabled = popoutUnavailable;
   if (dom.textPopout) dom.textPopout.disabled = popoutUnavailable;
   if (dom.windowPopin) dom.windowPopin.disabled = popoutUnavailable || !(card_state.textPopoutWindow && !card_state.textPopoutWindow.closed);
@@ -868,7 +968,6 @@ function captureHistorySnapshot() {
     lines: card_state.lines.map((line) => ({ ...line })),
     preferences: { ...card_state.preferences },
     timelineY: card_state.timelineY,
-    storylineTitles: { ...card_state.storylineTitles },
     characters: [...card_state.characters],
     pan: { ...card_state.pan },
     zoom: card_state.zoom,
@@ -908,7 +1007,6 @@ function restoreHistorySnapshot(snapshot) {
   card_state.lines = snapshot.lines.map((line) => ({ ...line }));
   card_state.preferences = { ...snapshot.preferences };
   card_state.timelineY = Number.isFinite(snapshot.timelineY) ? snapshot.timelineY : null;
-  card_state.storylineTitles = { ...snapshot.storylineTitles };
   card_state.characters = [...(snapshot.characters || [])];
   card_state.pan = { ...snapshot.pan };
   card_state.zoom = snapshot.zoom;
@@ -959,8 +1057,10 @@ function renderCanvasTransform() {
 // Renders cards UI markup or state.
 function renderCards() {
   dom.cardsLayer.innerHTML = card_state.cards.map(renderCard).join("");
+  const sizeChanged = syncRenderedCardSizes();
   dom.cardCount.value = String(card_state.cards.length);
   updateMobileCardEditingState();
+  if (sizeChanged) renderLines();
 }
 
 // Builds the HTML for one card from its current state and type.
@@ -972,14 +1072,42 @@ function renderCard(card) {
   const compact = expanded ? "" : " is-compact";
   const typeClass = ` is-${getCardType(card)}-card`;
   const color = safeHex(card.color, card_state.preferences.defaultCardColor);
-  const lineColor = getCardLineColor(card);
   const contrastColor = getContrastTextColor(color);
   return `
     <article id="${card.id}" class="card-item${selected}${raised}${compact}${typeClass}" data-card-id="${card.id}" data-card-type="${escapeAttr(getCardType(card))}"
-      style="left:${card.x}px;top:${card.y}px;--card-w:${size.width}px;--card-h:${size.height}px;--card-color:${color};--card-contrast:${contrastColor};--line-color:${lineColor};">
+      style="left:${card.x}px;top:${card.y}px;--card-w:${size.width}px;--card-h:${size.height}px;--card-color:${color};--card-contrast:${contrastColor};">
       ${expanded ? renderExpandedCard(card) : renderCompactCard(card)}
     </article>
   `;
+}
+
+// Synchronizes expanded card data sizes to their rendered content height.
+function syncRenderedCardSizes() {
+  if (isMobileMode()) return false;
+  let changed = false;
+  card_state.cards.forEach((card) => {
+    const fallback = isCardExpanded(card) ? card_sizes.expanded : card_sizes.compact;
+    if (!isCardExpanded(card)) {
+      if (card.size?.height !== fallback.height || card.size?.width !== fallback.width) {
+        card.size = { ...fallback };
+        changed = true;
+      }
+      return;
+    }
+    const element = document.getElementById(card.id);
+    if (!element) return;
+    element.style.setProperty("--card-h", `${fallback.height}px`);
+    const nextSize = {
+      width: fallback.width,
+      height: Math.max(fallback.height, Math.ceil(element.offsetHeight))
+    };
+    element.style.setProperty("--card-h", `${nextSize.height}px`);
+    if (Math.abs((card.size?.height || 0) - nextSize.height) > 1 || Math.abs((card.size?.width || 0) - nextSize.width) > 1) {
+      card.size = nextSize;
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 // Renders card top UI markup or state.
@@ -988,11 +1116,16 @@ function renderCardTop(card, expanded) {
   const controlTitle = expanded ? "Collapse" : "Expand";
   const controlIcon = expanded ? card_icons.close : card_icons.expand;
   const disabled = card.editable ? "" : " disabled";
-  const linkControl = isTimelineOrderedStoryCard(card) || isTitleCard(card)
+  const actControl = expanded && cardUsesAct(card)
+    ? `<select class="card-act-select" name="${escapeAttr(card.id)}_act" aria-label="ACT" data-field="act"${disabled}>
+        ${renderActOptions(card.fields.act)}
+      </select>`
+    : "";
+  const linkControl = actControl || (isTimelineOrderedStoryCard(card) || isTitleCard(card)
     ? '<span class="card-link-spacer" aria-hidden="true"></span>'
     : `<button class="icon-button card-link" type="button" data-action="connect" title="Drag to connect" aria-label="Drag to connect from this card">
         ${card_icons.link}
-      </button>`;
+      </button>`);
   return `
     <header class="card-top">
       ${linkControl}
@@ -1025,7 +1158,7 @@ function renderExpandedCard(card) {
           ${mediaPath ? `<img src="${escapeAttr(mediaPath)}" alt="">` : card_icons.image}
         </div>
       ` : ""}
-      <div class="material-content${bodyOnly ? " note-content" : ""}${titleFields ? " title-content" : ""}">
+      <div class="material-content${bodyOnly ? " note-content" : ""}${titleFields ? " title-content" : ""}${sceneFields ? " scene-content" : ""}">
         ${sceneFields ? `<div class="material-field slug-field" aria-label="Slug line">
           <input class="slug-visibility" name="${escapeAttr(card.id)}_slug_visible" aria-label="Show slug line in output" data-field="slugVisible" type="checkbox"${card.fields.slugVisible === true ? " checked" : ""}${disabled}>
           <select name="${escapeAttr(card.id)}_slug_prefix" aria-label="Interior or exterior" data-field="slugPrefix"${disabled}>
@@ -1033,7 +1166,7 @@ function renderExpandedCard(card) {
           </select>
           <input name="${escapeAttr(card.id)}_location" aria-label="Location" data-field="location" value="${escapeAttr(card.fields.location)}" placeholder="LOCATION"${disabled}>
           <select name="${escapeAttr(card.id)}_slug_time" aria-label="Time designation" data-field="slugTime"${disabled}>
-            ${SLUG_TIMES.map((value) => `<option value="${escapeAttr(value)}"${getSceneSlugTime(card) === value ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+            ${renderSlugTimeOptions(card)}
           </select>
         </div>` : ""}
         ${characterField ? `<div class="material-field character-field">
@@ -1042,9 +1175,6 @@ function renderExpandedCard(card) {
           </button>` : '<span class="character-add-spacer" aria-hidden="true"></span>'}
           ${renderCharacterChips(card, disabled)}
           ${card.showCharacterPicker && canAddCharacters ? renderCharacterPicker(card) : ""}
-        </div>` : ""}
-        ${sceneFields ? `<div class="material-field">
-          <input name="${escapeAttr(card.id)}_notes" aria-label="Notes" data-field="notes" value="${escapeAttr(card.fields.notes)}" placeholder="Notes"${disabled}>
         </div>` : ""}
         ${titleFields ? `<div class="material-field">
           <input name="${escapeAttr(card.id)}_author" aria-label="Author" data-field="author" value="${escapeAttr(card.fields.author)}" placeholder="Author"${disabled}>
@@ -1055,6 +1185,11 @@ function renderExpandedCard(card) {
         <div class="material-field">
           <input name="${escapeAttr(card.id)}_tagline" aria-label="Tagline" data-field="tagline" value="${escapeAttr(card.fields.tagline)}" placeholder="Tagline"${disabled}>
         </div>` : renderSupportingEditor(card, disabled)}
+        ${sceneFields ? `<div class="material-field transition-field">
+          <select name="${escapeAttr(card.id)}_transition" aria-label="Scene transition" data-field="transition"${disabled}>
+            ${renderTransitionOptions(card)}
+          </select>
+        </div>` : ""}
       </div>
     </div>
     <footer class="card-bottom">
@@ -1074,11 +1209,21 @@ function renderExpandedCard(card) {
 
 // Builds body markup controls for expanded editable cards.
 function renderBodyMarkupToolbar(card) {
+  const expanded = Boolean(card.showTextTools);
   return `
-    <div class="body-markup-toolbar" aria-label="Body markup controls">
-      <button class="icon-button card-control" type="button" data-action="markup-bold" title="Bold" aria-label="Bold selected body text">${card_icons.bold}</button>
-      <button class="icon-button card-control" type="button" data-action="markup-italic" title="Italic" aria-label="Italicize selected body text">${card_icons.italic}</button>
-      <button class="icon-button card-control" type="button" data-action="markup-color" title="Text color" aria-label="Change selected body text color">${card_icons.textColor}</button>
+    <div class="body-markup-toolbar${expanded ? " is-open" : ""}" aria-label="Body markup controls">
+      <button class="icon-button card-control" type="button" data-action="toggle-text-tools" title="Text controls" aria-label="Toggle body text controls" aria-pressed="${expanded}">${card_icons.textTools}</button>
+      ${expanded ? `
+        <span class="body-markup-tools">
+          <button class="icon-button card-control" type="button" data-action="markup-bold" title="Bold" aria-label="Bold selected body text">${card_icons.bold}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-italic" title="Italic" aria-label="Italicize selected body text">${card_icons.italic}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-color" title="Text color" aria-label="Change selected body text color">${card_icons.textColor}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-indent" title="Indent" aria-label="Indent selected body text">${card_icons.tab}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-align-left" title="Align left" aria-label="Align selected body text left">${card_icons.alignLeft}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-align-center" title="Align center" aria-label="Center selected body text">${card_icons.alignCenter}</button>
+          <button class="icon-button card-control" type="button" data-action="markup-align-right" title="Align right" aria-label="Align selected body text right">${card_icons.alignRight}</button>
+        </span>
+      ` : ""}
     </div>
   `;
 }
@@ -1242,6 +1387,11 @@ function handleCardClick(event) {
     renderCards();
     return;
   }
+  if (action === "toggle-text-tools") {
+    card.showTextTools = !card.showTextTools;
+    renderCards();
+    return;
+  }
   if (action === "markup-bold") {
     applyBodyMarkup(card, "bold");
     return;
@@ -1254,6 +1404,22 @@ function handleCardClick(event) {
     openBodyTextColorPicker(card);
     return;
   }
+  if (action === "markup-indent") {
+    applyBodyMarkup(card, "indent");
+    return;
+  }
+  if (action === "markup-align-left") {
+    applyBodyMarkup(card, "align-left");
+    return;
+  }
+  if (action === "markup-align-center") {
+    applyBodyMarkup(card, "align-center");
+    return;
+  }
+  if (action === "markup-align-right") {
+    applyBodyMarkup(card, "align-right");
+    return;
+  }
   if (action === "activate-body-insert") {
     activateBodyInsert(card, actionButton.dataset.blockIndex);
     return;
@@ -1263,7 +1429,7 @@ function handleCardClick(event) {
     return;
   }
   if (action === "delete-speech-bubble") {
-    deleteSpeechBubble(card, actionButton.dataset.blockIndex);
+    requestSpeechBubbleDelete(card, actionButton.dataset.blockIndex);
     return;
   }
   if (action === "add-character-to-card") {
@@ -1280,6 +1446,7 @@ function handleCardClick(event) {
   }
   if (action === "delete") {
     card_state.pendingDeleteId = card.id;
+    configureDeleteDialogForCard(card);
     dom.deleteDialog.showModal();
     return;
   }
@@ -1294,6 +1461,29 @@ function handleCardInput(event) {
   const card = findCard(event.target.closest(".card-item")?.dataset.cardId);
   if (!card) return;
   if (field === "slugVisible" && event.type === "input") return;
+  if (["act", "slugPrefix", "slugTime", "transition"].includes(field) && event.type === "input") return;
+  if (field === "slugTime" && event.target.value === CUSTOM_SELECT_VALUE) {
+    const custom = promptCustomSelectValue("Custom Time Designation", getSceneSlugTime(card), normalizeSlugTimeValue);
+    if (custom) {
+      recordHistory();
+      card.fields.slugTime = custom;
+      markDirty();
+    }
+    renderCards();
+    renderStory();
+    return;
+  }
+  if (field === "transition" && event.target.value === CUSTOM_SELECT_VALUE) {
+    const custom = promptCustomSelectValue("Custom Transition", getSceneTransition(card), normalizeTransitionValue);
+    if (custom) {
+      recordHistory();
+      card.fields.transition = custom;
+      markDirty();
+    }
+    renderCards();
+    renderStory();
+    return;
+  }
 
   recordHistory();
   if (field === "supportingBlock") {
@@ -1306,10 +1496,14 @@ function handleCardInput(event) {
   } else if (field === "location" && cardUsesSceneFields(card)) {
     card.fields[field] = normalizeSlugText(event.target.value);
     event.target.value = card.fields[field];
+  } else if (field === "act") {
+    card.fields[field] = normalizeActValue(event.target.value);
   } else if (field === "slugPrefix") {
     card.fields[field] = SLUG_PREFIXES.includes(event.target.value) ? event.target.value : SLUG_PREFIXES[0];
   } else if (field === "slugTime") {
-    card.fields[field] = SLUG_TIMES.includes(event.target.value) ? event.target.value : SLUG_TIMES[0];
+    card.fields[field] = normalizeSlugTimeValue(event.target.value) || SLUG_TIMES[0];
+  } else if (field === "transition") {
+    card.fields[field] = normalizeTransitionValue(event.target.value);
   } else {
     card.fields[field] = event.target.value;
     if (field === "header" && isTitleCard(card)) {
@@ -1331,7 +1525,7 @@ function handleCardChange(event) {
     renderStory();
     return;
   }
-  if (field === "slugPrefix" || field === "slugTime" || field === "slugVisible") {
+  if (field === "act" || field === "slugPrefix" || field === "slugTime" || field === "slugVisible" || field === "transition") {
     handleCardInput(event);
     renderCards();
     renderStory();
@@ -1445,6 +1639,26 @@ function openBodyTextColorPicker(card) {
     end: textarea.selectionEnd ?? textarea.selectionStart ?? textarea.value.length
   };
   openCenteredColorPicker("text-color", "#000000", card.id);
+}
+
+// Preserves body text selection before toolbar buttons receive focus.
+function preserveBodyMarkupSelection(event) {
+  const button = event.target.closest(".body-markup-toolbar [data-action]");
+  if (!button || !button.dataset.action?.startsWith("markup-")) return;
+  const card = findCard(button.closest(".card-item")?.dataset.cardId);
+  if (!card) return;
+  const active = document.activeElement;
+  const textarea = active?.matches?.(`#${CSS.escape(card.id)} textarea[data-field="supporting"], #${CSS.escape(card.id)} .dialog-scene-text`)
+    ? active
+    : getCardBodyTextarea(card.id);
+  if (!textarea) return;
+  card_state.textMarkupSelection = {
+    cardId: card.id,
+    blockIndex: textarea.dataset.blockIndex ?? "",
+    start: textarea.selectionStart ?? textarea.value.length,
+    end: textarea.selectionEnd ?? textarea.selectionStart ?? textarea.value.length
+  };
+  event.preventDefault();
 }
 
 // Opens centered color picker.
@@ -2017,12 +2231,13 @@ function createCardAt(x, y, options = {}) {
     color: getDefaultCardColorForType(cardType),
     fields: {
       header: options.fields?.header || "",
+      act: normalizeActValue(options.fields?.act),
       slugVisible: options.fields?.slugVisible === true,
       slugPrefix: SLUG_PREFIXES.includes(options.fields?.slugPrefix) ? options.fields.slugPrefix : SLUG_PREFIXES[0],
       location: normalizeSlugText(options.fields?.location || ""),
-      slugTime: SLUG_TIMES.includes(options.fields?.slugTime) ? options.fields.slugTime : SLUG_TIMES[0],
+      slugTime: normalizeSlugTimeValue(options.fields?.slugTime) || SLUG_TIMES[0],
+      transition: normalizeTransitionValue(options.fields?.transition),
       characters: normalizeCardCharacters(options.fields?.characters),
-      notes: options.fields?.notes || "",
       author: options.fields?.author || "",
       date: options.fields?.date || "",
       tagline: options.fields?.tagline || "",
@@ -2166,11 +2381,12 @@ function copyCard(cardId) {
     type: source.type,
     fields: {
       slugVisible: source.fields.slugVisible === true,
+      act: source.fields.act || "",
       slugPrefix: source.fields.slugPrefix,
       location: source.fields.location,
       slugTime: source.fields.slugTime,
+      transition: source.fields.transition || "",
       characters: getCardCharacters(source),
-      notes: source.fields.notes,
       author: source.fields.author || "",
       date: source.fields.date || "",
       tagline: source.fields.tagline || "",
@@ -2525,12 +2741,9 @@ function insertCardIntoStoryFlow(card) {
 // Finds the nearest direct story line that contains a card's center between its endpoints.
 function findInsertionLineForCard(card) {
   const center = getCardCenter(card);
-  const axis = getNewCardAxis();
   const grid = card_state.preferences.gridSize || card_defaults.gridSize;
   const cardSize = getCardSize(card);
-  const threshold = axis === "y"
-    ? cardSize.width / 2 + grid * 2
-    : cardSize.height / 2 + grid * 2;
+  const threshold = cardSize.height / 2 + grid * 2;
 
   return card_state.lines
     .map((line) => {
@@ -2541,9 +2754,7 @@ function findInsertionLineForCard(card) {
       const end = getCardCenter(target);
       const sourceSize = getCardSize(source);
       const targetSize = getCardSize(target);
-      const between = axis === "y"
-        ? isBetweenCardEdges(center.y, source.y, sourceSize.height, target.y, targetSize.height, grid)
-        : isBetweenCardEdges(center.x, source.x, sourceSize.width, target.x, targetSize.width, grid);
+      const between = isBetweenCardEdges(center.x, source.x, sourceSize.width, target.x, targetSize.width, grid);
       if (!between) return null;
       const distanceToLine = pointToSegmentDistance(center, start, end);
       if (distanceToLine > threshold) return null;
@@ -2600,6 +2811,18 @@ function deletePendingCard() {
   card_state.pendingDeleteId = null;
   markDirty();
   renderAll();
+}
+
+// Configures delete dialog copy for card type.
+function configureDeleteDialogForCard(card) {
+  if (!dom.deleteDialogTitle || !dom.deleteDialogMessage) return;
+  if (isCharacterCard(card)) {
+    dom.deleteDialogTitle.textContent = "Delete character?";
+    dom.deleteDialogMessage.textContent = "Are you sure you want to DELETE this character?";
+    return;
+  }
+  dom.deleteDialogTitle.textContent = "Delete card?";
+  dom.deleteDialogMessage.textContent = "Connected lines for this card will also be removed.";
 }
 
 // Renders lines UI markup or state.
@@ -2747,10 +2970,373 @@ function pointsEqual(a, b) {
 // Renders story UI markup or state.
 function renderStory() {
   const storylines = buildStorylines();
+  const fields = getActiveStoryFields();
   updateMobileStoryProjectTitle();
   dom.storyCount.value = String(storylines.reduce((sum, group) => sum + group.cards.length, 0));
+  dom.windowText.classList.toggle("show-page-numbers", Boolean(fields.pageNumbers));
   dom.storyOutput.innerHTML = getStoryBodyHtml(storylines, { liveEditing: true });
+  scheduleStoryPagination(fields);
   refreshTextPopout();
+}
+
+// Schedules expensive screenplay pagination outside the immediate render path.
+function scheduleStoryPagination(fields = getActiveStoryFields()) {
+  cancelStoryPagination();
+  if (!fields.pageNumbers || !shouldShowOutputRender()) return;
+  const run = () => {
+    card_state.storyPaginationHandle = null;
+    card_state.storyPaginationHandleType = "";
+    paginateStoryOutput(dom.storyOutput, fields);
+  };
+  if ("requestIdleCallback" in window) {
+    card_state.storyPaginationHandleType = "idle";
+    card_state.storyPaginationHandle = window.requestIdleCallback(run, { timeout: 450 });
+  } else {
+    card_state.storyPaginationHandleType = "timeout";
+    card_state.storyPaginationHandle = window.setTimeout(run, 80);
+  }
+}
+
+// Cancels a pending story pagination job.
+function cancelStoryPagination() {
+  if (card_state.storyPaginationHandle === null) return;
+  if (card_state.storyPaginationHandleType === "idle" && "cancelIdleCallback" in window) {
+    window.cancelIdleCallback(card_state.storyPaginationHandle);
+  } else {
+    window.clearTimeout(card_state.storyPaginationHandle);
+  }
+  card_state.storyPaginationHandle = null;
+  card_state.storyPaginationHandleType = "";
+}
+
+// Paginates the visible story output into screenplay-sized pages when page numbers are enabled.
+function paginateStoryOutput(container = dom.storyOutput, fields = getActiveStoryFields()) {
+  if (!container) return;
+  container.classList.remove("is-paginated");
+  if (!fields.pageNumbers || !shouldShowOutputRender() || !container.children.length) return;
+  if (!container.getClientRects().length) return;
+
+  const nodes = collectStoryPaginationNodes(container);
+  const pages = document.createElement("div");
+  pages.className = "story-pages";
+  container.textContent = "";
+  container.classList.add("is-paginated");
+  container.appendChild(pages);
+
+  const hasTitlePage = Boolean(fields.titleCard && getTitleCard());
+  let page = createScreenplayPage(1, hasTitlePage);
+  pages.appendChild(page.element);
+
+  nodes.forEach((node) => {
+    page = appendStoryNodeToPages(node, page, pages, hasTitlePage);
+  });
+}
+
+// Returns story nodes as pagination units, flattening timeline wrappers into cards.
+function collectStoryPaginationNodes(container) {
+  return Array.from(container.children).flatMap((node) => (
+    node.classList?.contains("storyline") ? Array.from(node.children) : [node]
+  ));
+}
+
+// Appends one story node to paginated screenplay pages, splitting dialogue when needed.
+function appendStoryNodeToPages(node, page, pages, hasTitlePage) {
+  if (!node.classList?.contains("story-card") || !node.querySelector(".story-dialog-body")) {
+    return appendWholeStoryNodeToPages(node, page, pages, hasTitlePage);
+  }
+  return appendDialogStoryCardToPages(node, page, pages, hasTitlePage);
+}
+
+// Appends an unsplittable story node to pages.
+function appendWholeStoryNodeToPages(node, page, pages, hasTitlePage) {
+  page.content.appendChild(node);
+  if (page.content.children.length > 1 && isPageOverflowing(page)) {
+    page.content.removeChild(node);
+    page = createNextScreenplayPage(pages, hasTitlePage);
+    page.content.appendChild(node);
+  }
+  return page;
+}
+
+// Appends a story card with dialogue, allowing dialogue units to continue across pages.
+function appendDialogStoryCardToPages(sourceCard, page, pages, hasTitlePage) {
+  let card = cloneStoryCardShell(sourceCard);
+  page.content.appendChild(card);
+  const children = Array.from(sourceCard.children).filter((child) => !child.classList?.contains("story-card-actions"));
+  children.forEach((child) => {
+    if (child.classList?.contains("story-dialog-body")) {
+      ({ page, card } = appendDialogBodyToPages(child, sourceCard, page, pages, hasTitlePage, card));
+    } else {
+      ({ page, card } = appendStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card));
+    }
+  });
+  if (!storyCardHasContent(card)) card.remove();
+  return page;
+}
+
+// Creates an empty clone of a story card shell, preserving actions for in-app editing.
+function cloneStoryCardShell(sourceCard) {
+  const clone = sourceCard.cloneNode(false);
+  const actions = sourceCard.querySelector(":scope > .story-card-actions");
+  if (actions) clone.appendChild(actions.cloneNode(true));
+  return clone;
+}
+
+// Returns whether a story card shell contains visible output content.
+function storyCardHasContent(card) {
+  return Array.from(card.children).some((child) => {
+    if (child.classList?.contains("story-card-actions")) return false;
+    if (child.classList?.contains("story-dialog-body") && !child.children.length) return false;
+    return Boolean(child.textContent.trim() || child.querySelector?.("img, video, audio, canvas") || child.children.length);
+  });
+}
+
+// Appends a non-dialog card child, moving the whole child when it does not fit.
+function appendStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card) {
+  const clone = child.cloneNode(true);
+  card.appendChild(clone);
+  if (isPageOverflowing(page)) {
+    card.removeChild(clone);
+    if (!storyCardHasContent(card)) card.remove();
+    page = createNextScreenplayPage(pages, hasTitlePage);
+    card = cloneStoryCardShell(sourceCard);
+    page.content.appendChild(card);
+    card.appendChild(clone);
+  }
+  return { page, card };
+}
+
+// Appends mixed direction and dialogue content to pages.
+function appendDialogBodyToPages(sourceBody, sourceCard, page, pages, hasTitlePage, card) {
+  let body = ensureDialogBodyForCard(card, sourceBody);
+  Array.from(sourceBody.children).forEach((child) => {
+    if (child.classList?.contains("dialog-unit")) {
+      ({ page, card, body } = appendDialogUnitToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body));
+    } else {
+      ({ page, card, body } = appendDirectionLineToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body));
+    }
+  });
+  if (!body.children.length) body.remove();
+  return { page, card };
+}
+
+// Ensures the current card has a dialog-body container.
+function ensureDialogBodyForCard(card, sourceBody) {
+  let body = card.querySelector(":scope > .story-dialog-body");
+  if (!body) {
+    body = sourceBody.cloneNode(false);
+    card.appendChild(body);
+  }
+  return body;
+}
+
+// Appends a direction/action body line without splitting it.
+function appendDirectionLineToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body) {
+  const clone = child.cloneNode(true);
+  body.appendChild(clone);
+  if (isPageOverflowing(page)) {
+    body.removeChild(clone);
+    if (!body.children.length) body.remove();
+    if (!storyCardHasContent(card)) card.remove();
+    page = createNextScreenplayPage(pages, hasTitlePage);
+    card = cloneStoryCardShell(sourceCard);
+    page.content.appendChild(card);
+    body = ensureDialogBodyForCard(card, sourceBody);
+    body.appendChild(clone);
+  }
+  return { page, card, body };
+}
+
+// Appends a dialogue unit, splitting at sentence boundaries when it crosses a page.
+function appendDialogUnitToPages(unit, sourceBody, sourceCard, page, pages, hasTitlePage, card, body) {
+  const whole = unit.cloneNode(true);
+  body.appendChild(whole);
+  if (!isPageOverflowing(page)) return { page, card, body };
+  body.removeChild(whole);
+
+  const speaker = unit.querySelector(".dialog-speaker")?.textContent?.trim() || "";
+  const sentences = splitDialogueIntoSentences(unit);
+  if (!sentences.length) {
+    return appendDirectionLineToPages(unit, sourceBody, sourceCard, page, pages, hasTitlePage, card, body);
+  }
+
+  const remaining = [...sentences];
+  let dialogueStarted = false;
+  let guard = 0;
+  while (remaining.length) {
+    guard += 1;
+    if (guard > 500) break;
+    const speakerLabel = dialogueStarted ? addContinuationToSpeakerLabel(speaker) : speaker;
+    const currentUnit = createDialogContinuationUnit(speakerLabel);
+    body.appendChild(currentUnit);
+    let added = 0;
+
+    while (remaining.length) {
+      const line = createDialogLine(remaining[0]);
+      currentUnit.appendChild(line);
+      if (isPageOverflowing(page)) {
+        currentUnit.removeChild(line);
+        if (added === 0) {
+          currentUnit.remove();
+          if (!pageHasVisibleStoryContent(page)) {
+            currentUnit.appendChild(line);
+            body.appendChild(currentUnit);
+            remaining.shift();
+            added = 1;
+          } else {
+            ({ page, card, body } = moveDialogueToNextPage(sourceBody, sourceCard, pages, hasTitlePage));
+          }
+        }
+        break;
+      }
+      remaining.shift();
+      added += 1;
+    }
+
+    if (!added) continue;
+
+    if (remaining.length) {
+      if (!fitMoreCueOnPage(body, currentUnit, remaining, page)) {
+        if (!body.children.length) body.remove();
+        if (!storyCardHasContent(card)) card.remove();
+        ({ page, card, body } = moveDialogueToNextPage(sourceBody, sourceCard, pages, hasTitlePage));
+        continue;
+      }
+      dialogueStarted = true;
+      ({ page, card, body } = moveDialogueToNextPage(sourceBody, sourceCard, pages, hasTitlePage));
+    } else {
+      dialogueStarted = true;
+    }
+  }
+  return { page, card, body };
+}
+
+// Creates the next page and shell needed to continue dialogue.
+function moveDialogueToNextPage(sourceBody, sourceCard, pages, hasTitlePage) {
+  const page = createNextScreenplayPage(pages, hasTitlePage);
+  const card = cloneStoryCardShell(sourceCard);
+  page.content.appendChild(card);
+  const body = ensureDialogBodyForCard(card, sourceBody);
+  return { page, card, body };
+}
+
+// Returns whether a screenplay page already has visible story content.
+function pageHasVisibleStoryContent(page) {
+  return Array.from(page.content.children).some((child) => (
+    child.classList?.contains("story-card") ? storyCardHasContent(child) : Boolean(child.textContent.trim())
+  ));
+}
+
+// Adds a MORE cue, rolling back the last sentence when needed so it fits.
+function fitMoreCueOnPage(body, currentUnit, remaining, page) {
+  addMoreCue(body);
+  if (!isPageOverflowing(page)) return true;
+  removeMoreCue(body);
+
+  while (currentUnit.querySelector(":scope > .dialog-line")) {
+    const lines = Array.from(currentUnit.querySelectorAll(":scope > .dialog-line"));
+    const lastLine = lines[lines.length - 1];
+    remaining.unshift(lastLine.textContent || "");
+    lastLine.remove();
+    if (!currentUnit.querySelector(":scope > .dialog-line")) {
+      currentUnit.remove();
+      return false;
+    }
+    addMoreCue(body);
+    if (!isPageOverflowing(page)) return true;
+    removeMoreCue(body);
+  }
+  currentUnit.remove();
+  return false;
+}
+
+// Splits a rendered dialogue unit into sentence-safe chunks.
+function splitDialogueIntoSentences(unit) {
+  const text = Array.from(unit.querySelectorAll(".dialog-line"))
+    .map((line) => line.textContent || "")
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return [];
+  return text.match(/[^.!?]+(?:[.!?]+["')\]]*|$)/g)
+    ?.map((sentence) => sentence.trim())
+    .filter(Boolean) || [text];
+}
+
+// Creates a rendered dialogue continuation unit.
+function createDialogContinuationUnit(speaker) {
+  const unit = document.createElement("span");
+  unit.className = "dialog-unit";
+  const header = document.createElement("strong");
+  header.className = "dialog-speaker";
+  header.textContent = speaker;
+  unit.appendChild(header);
+  return unit;
+}
+
+// Creates one rendered dialogue line.
+function createDialogLine(text) {
+  const line = document.createElement("span");
+  line.className = "dialog-line";
+  line.textContent = text;
+  return line;
+}
+
+// Adds a screenplay MORE cue to the bottom of a split dialogue page.
+function addMoreCue(body) {
+  removeMoreCue(body);
+  const more = document.createElement("strong");
+  more.className = "dialog-speaker dialog-more";
+  more.textContent = "(MORE)";
+  body.appendChild(more);
+}
+
+// Removes a pending MORE cue from a dialog body.
+function removeMoreCue(body) {
+  body.querySelector(":scope > .dialog-more")?.remove();
+}
+
+// Adds CONT'D to a continued dialogue speaker label.
+function addContinuationToSpeakerLabel(label) {
+  const text = String(label || "").trim();
+  return /\(CONT'D\)\s*$/i.test(text) ? text : `${text} (CONT'D)`;
+}
+
+// Returns whether a page content area has overflowed its screenplay page.
+function isPageOverflowing(page) {
+  return page.content.scrollHeight > page.content.clientHeight + 2;
+}
+
+// Creates and appends the next screenplay page.
+function createNextScreenplayPage(pages, hasTitlePage) {
+  const page = createScreenplayPage(pages.children.length + 1, hasTitlePage);
+  pages.appendChild(page.element);
+  return page;
+}
+
+// Creates one screenplay page shell with an optional standards-style page number.
+function createScreenplayPage(pageIndex, hasTitlePage) {
+  const element = document.createElement("section");
+  element.className = "screenplay-page";
+  element.dataset.pageIndex = String(pageIndex);
+  const label = getScreenplayPageNumberLabel(pageIndex, hasTitlePage);
+  if (label) {
+    const number = document.createElement("span");
+    number.className = "screenplay-page-number";
+    number.textContent = `${label}.`;
+    element.appendChild(number);
+  }
+  const content = document.createElement("div");
+  content.className = "screenplay-page-content";
+  element.appendChild(content);
+  return { element, content };
+}
+
+// Returns a screenplay page label, omitting title page and first script page.
+function getScreenplayPageNumberLabel(pageIndex, hasTitlePage) {
+  const firstNumberedPhysicalPage = hasTitlePage ? 3 : 2;
+  if (pageIndex < firstNumberedPhysicalPage) return "";
+  return String(hasTitlePage ? pageIndex - 1 : pageIndex);
 }
 
 // Returns story body html.
@@ -2762,7 +3348,7 @@ function getStoryBodyHtml(storylines = buildStorylines(), options = {}) {
   const projectNotes = fields.titleCard && !titleIsOnTimeline ? renderFootnotesForTarget(PROJECT_TARGET_ID, options) : "";
   const emptyStory = projectTitle || projectNotes ? "" : '<div class="empty-story">Place scene cards on the timeline to build story.</div>';
   return storylines.length
-    ? `${projectTitle}${projectNotes}${storylines.map((group, index) => renderStoryline(group, index, storylines.length > 1 && fields.act, options)).join("")}`
+    ? `${projectTitle}${projectNotes}${storylines.map((group, index) => renderStoryline(group, index, false, options)).join("")}`
     : `${projectTitle}${projectNotes}${emptyStory}`;
 }
 
@@ -2796,17 +3382,10 @@ function renderProjectTitleBlock(options = {}) {
 
 // Renders storyline UI markup or state.
 function renderStoryline(group, index, showTitle, options = {}) {
-  const colorStyle = group.color ? ` style="color:${escapeAttr(group.color)}"` : "";
-  const title = getStorylineTitle(group, index);
-  const defaultTitle = getDefaultActTitle(index);
-  const titleMarkup = options.liveEditing
-    ? `<h1 class="storyline-title story-editable" data-story-edit="storyline" data-storyline-key="${escapeAttr(group.key)}" data-default-title="${escapeAttr(defaultTitle)}" title="Double-click or long-press to edit"${colorStyle}>${escapeHtml(title)}</h1>`
-    : `<h1 class="storyline-title"${colorStyle}>${escapeHtml(title)}</h1>`;
   const cardsHtml = group.cards.map((card) => renderStoryCard(card, options)).join("");
-  if (!showTitle && !cardsHtml.trim()) return "";
+  if (!cardsHtml.trim()) return "";
   return `
     <section class="storyline">
-      ${showTitle ? titleMarkup : ""}
       ${cardsHtml}
     </section>
   `;
@@ -2820,12 +3399,13 @@ function renderStoryCard(card, options = {}) {
   const characters = getCardCharacters(card).join(", ");
   const hasDialog = hasDialogBlocks(card.fields.supporting, card);
   const parts = [
+    fields.act && card.fields.act ? renderStoryTextPart("h1", "act", card, card.fields.act, options, "story-act") : "",
     fields.media && cardSupportsMedia(card) && mediaPath ? `<img src="${escapeAttr(mediaPath)}" alt="">` : "",
     fields.header ? renderStoryTextPart("h2", "header", card, getDisplayCardTitle(card), options) : "",
     fields.location && cardUsesSceneFields(card) && card.fields.slugVisible === true && getSceneSlug(card) ? renderStoryTextPart("h3", "location", card, getSceneSlug(card), options, "story-slug") : "",
     fields.characters && characters ? renderStoryTextPart("p", "characters", card, characters, options, "story-characters") : "",
-    fields.notes && cardUsesSceneFields(card) && card.fields.notes ? renderStoryTextPart("h3", "notes", card, card.fields.notes, options) : "",
-    fields.supporting && card.fields.supporting ? renderStoryTextPart(hasDialog ? "div" : "p", "supporting", card, card.fields.supporting, options, hasDialog ? "story-dialog-body" : "") : ""
+    fields.supporting && card.fields.supporting ? renderStoryTextPart(hasDialog ? "div" : "p", "supporting", card, card.fields.supporting, options, hasDialog ? "story-dialog-body" : "") : "",
+    cardUsesSceneFields(card) && getSceneTransition(card) ? renderStoryTextPart("p", "transition", card, getSceneTransition(card), options, "story-transition") : ""
   ].filter(Boolean);
   if (!parts.length) return "";
   const actions = options.liveEditing
@@ -2957,50 +3537,8 @@ function orderCardsWithinGroup(ids) {
   return ordered;
 }
 
-// Returns group line color.
-function getGroupLineColor(ids) {
-  const idSet = new Set(ids);
-  const line = card_state.lines
-    .filter((item) => idSet.has(item.sourceId) && idSet.has(item.targetId))
-    .sort((a, b) => a.creationIndex - b.creationIndex)[0];
-  return line ? getLineRenderColor(line) : card_defaults.lineColor;
-}
-
-// Returns storyline key.
-function getStorylineKey(ids) {
-  return [...ids].sort().join("|");
-}
-
-// Returns storyline title.
-function getStorylineTitle(group, index) {
-  return card_state.storylineTitles[group.key] || getDefaultActTitle(index);
-}
-
-// Returns default act title.
-function getDefaultActTitle(index) {
-  return `ACT ${String(index + 1).padStart(2, "0")}`;
-}
-
-// Returns new card axis.
-function getNewCardAxis() {
-  return card_state.preferences.newCardAxis === "y" ? "y" : "x";
-}
-
-// Normalizes storyline titles.
-function normalizeStorylineTitles(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([key, title]) => [String(key), String(title || "").trim()])
-      .filter(([, title]) => title)
-  );
-}
-
 // Supports sort cards.
 function sortCards(a, b) {
-  if (getNewCardAxis() === "y") {
-    return a.y - b.y || a.x - b.x || a.creationIndex - b.creationIndex;
-  }
   return a.x - b.x || a.y - b.y || a.creationIndex - b.creationIndex;
 }
 
@@ -3016,7 +3554,7 @@ function getActiveStoryFields() {
 // Handles story double click events and updates related state.
 function handleStoryDoubleClick(event) {
   const target = event.target.closest(".story-editable");
-  if (!target || target.closest(".story-inline-editor")) return;
+  if (!target || target.closest(".story-editing")) return;
   event.preventDefault();
   beginStoryEdit(target);
 }
@@ -3074,24 +3612,18 @@ function clearStoryPress() {
 function beginStoryEdit(element) {
   clearStoryPress();
   if (!element?.isConnected) return;
-  const existingEditor = dom.storyOutput.querySelector(".story-inline-editor");
+  const existingEditor = dom.storyOutput.querySelector(".story-editing");
   if (existingEditor) commitStoryEditor(existingEditor);
 
   const editType = element.dataset.storyEdit;
-  const value = getStoryEditValue(element);
-  const editor = document.createElement(editType === "supporting" ? "textarea" : "input");
-  editor.className = `story-inline-editor${editType === "supporting" ? " story-inline-textarea" : ""}`;
-  editor.name = `story_${editType}_${element.dataset.cardId || element.dataset.storylineKey || "project"}`;
-  editor.value = value;
-  editor.dataset.storyEdit = editType;
-  editor.dataset.originalValue = value;
-  if (element.dataset.cardId) editor.dataset.cardId = element.dataset.cardId;
-  if (element.dataset.storylineKey) editor.dataset.storylineKey = element.dataset.storylineKey;
-  if (element.dataset.defaultTitle) editor.dataset.defaultTitle = element.dataset.defaultTitle;
-  if (element.style.color) editor.style.color = element.style.color;
-  element.replaceWith(editor);
-  editor.focus();
-  editor.select();
+  element.classList.add("story-editing");
+  element.contentEditable = "true";
+  element.spellcheck = true;
+  element.dataset.originalValue = getStoryEditValue(element);
+  element.dataset.originalHtml = element.innerHTML;
+  element.dataset.storyEdit = editType;
+  element.focus();
+  selectEditableContents(element);
 }
 
 // Returns story edit value.
@@ -3108,7 +3640,7 @@ function getStoryEditValue(element) {
   if (editType === "projectTitle") {
     return getProjectName();
   }
-  if (["location", "characters", "notes"].includes(editType)) {
+  if (["location", "characters", "transition"].includes(editType)) {
     const card = findCard(element.dataset.cardId);
     if (editType === "characters") return getCardCharacters(card).join(", ");
     return card?.fields[editType] || "";
@@ -3120,17 +3652,96 @@ function getStoryEditValue(element) {
   return element.textContent.trim();
 }
 
+// Selects the full visible editable story text.
+function selectEditableContents(element) {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+// Returns the current edited story value from a contenteditable element.
+function getStoryEditedValue(editor) {
+  const editType = editor.dataset.storyEdit;
+  if (editType === "supporting") {
+    const card = findCard(editor.dataset.cardId);
+    if (card && hasDialogBlocks(card.fields.supporting, card)) return getEditedDialogSupportingValue(editor, card);
+    return htmlToBodyMarkup(editor);
+  }
+  return editor.textContent || "";
+}
+
+// Converts edited dialog output back into the card body block format.
+function getEditedDialogSupportingValue(editor, card) {
+  const sourceBlocks = parseSupportingBlocks(card.fields.supporting, card);
+  const textNodes = [...editor.querySelectorAll(".story-body-line")];
+  const dialogNodes = [...editor.querySelectorAll(".dialog-unit")];
+  let textIndex = 0;
+  let dialogIndex = 0;
+  const blocks = sourceBlocks.map((block) => {
+    if (block.type !== "dialog") {
+      const node = textNodes[textIndex++];
+      return { type: "text", text: node ? htmlToBodyMarkup(node) : block.text };
+    }
+    const node = dialogNodes[dialogIndex++];
+    const speaker = parseEditedDialogSpeakerLabel(node?.querySelector(".dialog-speaker")?.textContent, block);
+    const lines = node
+      ? [...node.querySelectorAll(".dialog-line")].map((line) => line.textContent || "").join("\n")
+      : block.text;
+    return { ...block, ...speaker, text: lines.trimEnd() };
+  });
+  return serializeSupportingBlocks(blocks);
+}
+
+// Parses an edited visible speaker label back into speaker and extension values.
+function parseEditedDialogSpeakerLabel(label, fallbackBlock) {
+  const fallback = {
+    speaker: fallbackBlock.speaker,
+    extension: sanitizeDialogExtension(fallbackBlock.extension)
+  };
+  const text = String(label || "").trim();
+  if (!text) return fallback;
+  const match = text.match(/^(.*?)\s*\((V\.O\.|O\.S\.|CONT'D)\)\s*$/i);
+  const speaker = sanitizeDialogSpeaker(match ? match[1] : text);
+  return {
+    speaker: speaker || fallback.speaker,
+    extension: match ? sanitizeDialogExtension(match[2]) : fallback.extension
+  };
+}
+
+// Converts simple edited HTML back into the lightweight body markup.
+function htmlToBodyMarkup(root) {
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const tag = node.tagName.toLowerCase();
+    if (tag === "br") return "\n";
+    const content = [...node.childNodes].map(walk).join("");
+    if (tag === "strong" || tag === "b") return `**${content}**`;
+    if (tag === "em" || tag === "i") return `*${content}*`;
+    if (node.classList.contains("story-align-center")) return `[align:center]${content}[/align]`;
+    if (node.classList.contains("story-align-right")) return `[align:right]${content}[/align]`;
+    if (node.classList.contains("story-align-left")) return `[align:left]${content}[/align]`;
+    const color = node.style?.color || "";
+    if (/^#[0-9a-f]{6}$/i.test(color)) return `[color:${color}]${content}[/color]`;
+    if (["div", "p"].includes(tag)) return `${content}\n`;
+    return content;
+  };
+  return [...root.childNodes].map(walk).join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // Handles story editor keydown events and updates related state.
 function handleStoryEditorKeydown(event) {
-  const editor = event.target.closest(".story-inline-editor");
+  const editor = event.target.closest(".story-editing");
   if (!editor) return;
   if (event.key === "Escape") {
     event.preventDefault();
     commitStoryEditor(editor, true);
     return;
   }
-  if (editor.tagName === "TEXTAREA" && !(event.ctrlKey || event.metaKey)) return;
   if (event.key === "Enter") {
+    if (event.shiftKey) return;
     event.preventDefault();
     commitStoryEditor(editor);
   }
@@ -3138,7 +3749,7 @@ function handleStoryEditorKeydown(event) {
 
 // Handles story editor blur events and updates related state.
 function handleStoryEditorBlur(event) {
-  const editor = event.target.closest(".story-inline-editor");
+  const editor = event.target.closest(".story-editing");
   if (!editor) return;
   commitStoryEditor(editor);
 }
@@ -3153,7 +3764,7 @@ function commitStoryEditor(editor, cancel = false) {
   }
 
   const editType = editor.dataset.storyEdit;
-  const value = editor.value.trim();
+  const value = getStoryEditedValue(editor).trim();
   const originalValue = editor.dataset.originalValue || "";
   if (value === originalValue) {
     renderStory();
@@ -3161,13 +3772,7 @@ function commitStoryEditor(editor, cancel = false) {
   }
 
   recordHistory();
-  if (editType === "storyline") {
-    const key = editor.dataset.storylineKey;
-    if (key) {
-      if (value) card_state.storylineTitles[key] = value;
-      else delete card_state.storylineTitles[key];
-    }
-  } else if (editType === "projectTitle") {
+  if (editType === "projectTitle") {
     card_state.projectName = value;
     updateProjectNameDisplay();
     syncTitleCardFromProjectName();
@@ -3185,7 +3790,10 @@ function commitStoryEditor(editor, cancel = false) {
       }
     }
     if (editType === "characters") setCardCharacters(card, value);
-    if (["location", "notes", "author", "date", "tagline"].includes(editType)) card.fields[editType] = value;
+    if (editType === "location") card.fields[editType] = normalizeSlugText(value);
+    if (editType === "transition") card.fields[editType] = normalizeTransitionValue(value);
+    if (editType === "act") card.fields[editType] = normalizeActValue(value);
+    if (["author", "date", "tagline"].includes(editType)) card.fields[editType] = value;
     if (editType === "supporting") card.fields.supporting = value;
   }
 
@@ -3256,7 +3864,6 @@ function hasUnsavedProjectChanges() {
     substantiveCards.length
     || card_state.lines.length
     || card_state.characters.length
-    || Object.keys(card_state.storylineTitles).length
     || String(card_state.projectName || "").trim()
   );
   return hasContent && !card_state.projectHasSavedFile;
@@ -3280,7 +3887,6 @@ function resetProject() {
   card_state.cards = [];
   card_state.lines = [];
   card_state.characters = [];
-  card_state.storylineTitles = {};
   card_state.fileHandle = null;
   card_state.savedProjectName = "";
   card_state.undoStack = [];
@@ -3310,10 +3916,10 @@ function resetStoryFieldToggles() {
     act: false,
     location: true,
     characters: false,
-    notes: true,
     noteCards: true,
     media: true,
     supporting: true,
+    pageNumbers: true,
     titleCard: false
   };
   document.querySelectorAll("[data-story-field]").forEach((checkbox) => {
@@ -3344,12 +3950,13 @@ function buildProjectData() {
       characterName: card.characterName || "",
       fields: {
         header: getPersistedTitle(card),
+        act: normalizeActValue(card.fields.act),
         slugVisible: card.fields.slugVisible === true,
         slugPrefix: getSceneSlugPrefix(card),
         location: card.fields.location,
         slugTime: getSceneSlugTime(card),
+        transition: getSceneTransition(card),
         characters: getStoredCardCharacters(card),
-        notes: card.fields.notes,
         author: card.fields.author || "",
         date: card.fields.date || "",
         tagline: card.fields.tagline || "",
@@ -3373,7 +3980,6 @@ function buildProjectData() {
         color: getLineRenderColor(line),
         creationIndex: line.creationIndex
       })),
-    storylineTitles: { ...card_state.storylineTitles },
     characters: [...card_state.characters],
     preferences: { ...card_state.preferences }
   };
@@ -3428,7 +4034,7 @@ function loadProjectFromFile(event) {
 }
 
 // Normalizes loaded project JSON into live application state.
-function loadProjectJson(project) {
+function loadProjectJson(project, options = {}) {
   card_state.projectName = String(project.projectName || "").trim();
   updateProjectNameDisplay();
   card_state.timelineY = Number.isFinite(Number(project.timelineY)) ? snap(Number(project.timelineY)) : null;
@@ -3436,20 +4042,19 @@ function loadProjectJson(project) {
   card_state.preferences = {
     defaultCardColor: safeHex(preferences.defaultCardColor, card_defaults.color),
     cardMedPref: preferences.cardMedPref === "image" ? "image" : "text",
-    newCardAxis: preferences.newCardAxis === "y" ? "y" : "x",
     gridSize: clamp(Number(preferences.gridSize) || card_defaults.gridSize, 8, 96),
     hideBranding: Boolean(preferences.hideBranding),
-    autoSaveEnabled: preferences.autoSaveEnabled !== false,
+    autoSaveEnabled: Boolean(preferences.autoSaveEnabled),
     autoSaveInterval: Number(preferences.autoSaveInterval) || card_defaults.autoSaveInterval,
     namingPrefix: normalizeNamingPrefix(preferences.namingPrefix || card_defaults.namingPrefix),
     namingSequence: preferences.namingSequence === "letter" ? "letter" : "number",
     cardView: preferences.cardView === "expanded" ? "expanded" : "collapsed",
-    editCardsOnOpen: Boolean(preferences.editCardsOnOpen)
+    editCardsOnOpen: Boolean(preferences.editCardsOnOpen),
+    showOutputRender: preferences.showOutputRender !== false
   };
   card_state.characters = Array.isArray(project.characters)
     ? [...new Set(project.characters.map((name) => String(name || "").trim()).filter(Boolean))]
     : [];
-  card_state.storylineTitles = normalizeStorylineTitles(project.storylineTitles);
 
   card_state.cards.forEach((card) => {
     if (card.localMediaUrl) URL.revokeObjectURL(card.localMediaUrl);
@@ -3475,12 +4080,13 @@ function loadProjectJson(project) {
       color: safeHex(raw.color, card_state.preferences.defaultCardColor),
       fields: {
         header: String(raw.fields?.header ?? ""),
+        act: normalizeActValue(raw.fields?.act),
         slugVisible: raw.fields?.slugVisible === true,
         slugPrefix: SLUG_PREFIXES.includes(raw.fields?.slugPrefix) ? raw.fields.slugPrefix : SLUG_PREFIXES[0],
         location: normalizeSlugText(String(raw.fields?.location ?? "")),
-        slugTime: SLUG_TIMES.includes(raw.fields?.slugTime) ? raw.fields.slugTime : SLUG_TIMES[0],
+        slugTime: normalizeSlugTimeValue(raw.fields?.slugTime) || SLUG_TIMES[0],
+        transition: normalizeTransitionValue(raw.fields?.transition),
         characters: normalizeCardCharacters(raw.fields?.characters),
-        notes: String(raw.fields?.notes ?? ""),
         author: String(raw.fields?.author ?? ""),
         date: String(raw.fields?.date ?? ""),
         tagline: String(raw.fields?.tagline ?? ""),
@@ -3500,6 +4106,7 @@ function loadProjectJson(project) {
   card_state.nextCardCreation = Math.max(0, ...card_state.cards.map((card) => card.creationIndex)) + 1;
   normalizeTitleCards();
   ensureTitleCard({ skipDirty: true });
+  ensureCharacterCards({ skipDirty: true });
   normalizeCardViewState();
 
   const cardIds = new Set(card_state.cards.map((card) => card.id));
@@ -3522,7 +4129,9 @@ function loadProjectJson(project) {
       creationIndex: Number(line.creationIndex) || index + 1
     }));
 
-  card_state.selectedCardId = getTitleCard()?.id || card_state.cards[0]?.id || null;
+  card_state.selectedCardId = options.selectTitle !== false
+    ? getTitleCard()?.id || card_state.cards[0]?.id || null
+    : card_state.cards[0]?.id || null;
   card_state.selectedCardIds = card_state.selectedCardId ? [card_state.selectedCardId] : [];
   card_state.nextCard = nextNumberFromIds(card_state.cards, /^card_(\d+)$/);
   card_state.nextLine = nextNumberFromIds(card_state.lines, /^card_line_(\d+)$/);
@@ -3539,7 +4148,7 @@ function loadProjectJson(project) {
 // Exports window text html.
 async function exportWindowTextHtml() {
   const bodyHtml = getStoryBodyHtml(buildStorylines(), { exportImages: true }).replace(
-    '<div class="empty-story">Connect cards to build story.</div>',
+    '<div class="empty-story">Place scene cards on the timeline to build story.</div>',
     '<div class="empty-story">No connected cards were present at export.</div>'
   );
   await saveBlobWithPicker(
@@ -3559,6 +4168,21 @@ async function exportWindowTextPlain() {
     "Plain Text",
     { "text/plain": [".txt"] }
   );
+}
+
+// Opens a printable screenplay document so the browser can save it as PDF.
+function exportWindowTextPdf() {
+  const bodyHtml = getStoryBodyHtml(buildStorylines(), { exportImages: true });
+  const html = buildStoryDocumentHtml(bodyHtml, false, { autoPrint: true });
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    showNotice("PDF window blocked");
+    return;
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+  showNotice("Use Print to save PDF");
 }
 
 // Exports character report.
@@ -3662,18 +4286,18 @@ function buildPlainTextStory() {
     return lines.join("\n");
   }
   storylines.forEach((group, index) => {
-    if (storylines.length > 1 && fields.act) lines.push(getStorylineTitle(group, index), "");
     group.cards.forEach((card) => {
       if (isTitleCard(card)) {
         if (fields.titleCard) appendPlainTitleCard(lines, fields);
         lines.push("");
         return;
       }
+      if (fields.act && card.fields.act) lines.push(card.fields.act);
       if (fields.header) lines.push(getDisplayCardTitle(card));
       if (fields.location && cardUsesSceneFields(card) && card.fields.slugVisible === true && getSceneSlug(card)) lines.push(getSceneSlug(card));
       if (fields.characters && getCardCharacters(card).length) lines.push(getCardCharacters(card).join(", "));
-      if (fields.notes && cardUsesSceneFields(card) && card.fields.notes) lines.push(card.fields.notes);
       if (fields.supporting && card.fields.supporting) lines.push(hasDialogBlocks(card.fields.supporting, card) ? plainDialogBodyText(card.fields.supporting, card) : plainBodyText(card.fields.supporting));
+      if (cardUsesSceneFields(card) && getSceneTransition(card)) lines.push(getSceneTransition(card));
       appendPlainNotes(lines, card.id, fields);
       lines.push("");
     });
@@ -3721,6 +4345,7 @@ function appendPlainNotes(lines, targetId, fields) {
 
 // Supports pop out text pane.
 function popOutTextPane() {
+  if (!shouldShowOutputRender()) return;
   if (window.location.protocol === "file:") {
     showNotice("Use the local server to pop out story");
     return;
@@ -3792,12 +4417,15 @@ function revokeTextPopoutUrl() {
 }
 
 // Builds the standalone story HTML export document.
-function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
+function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
   const documentTitle = escapeHtml(getProjectName());
   const headerButton = includePopInButton
     ? `<button class="popin-button" type="button" title="Pop in story" aria-label="Pop in story" onclick="window.opener && window.opener.cardPopInText()">${materialIcon("keyboard_return")}</button>`
     : "";
   const fields = getActiveStoryFields();
+  const pageNumberCss = fields.pageNumbers
+    ? '@page{size:Letter;margin:0;}'
+    : '@page{size:Letter;margin:.5in 1in .75in 1.5in;}';
   const assets = includePopInButton ? `
     <div class="popup-assets">
       <button class="assets-button" type="button" title="Filter assets" aria-label="Filter assets" onclick="document.body.classList.toggle('show-assets')">
@@ -3809,10 +4437,10 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
           act: "ACT",
           location: "Location",
           characters: "Characters",
-          notes: "Notes",
           noteCards: "Note Cards",
           media: "Media",
           supporting: "Body",
+          pageNumbers: "Page Numbers",
           titleCard: "Title Card"
         }).map(([field, label]) => `<label><input name="popup_${field}" type="checkbox" ${fields[field] ? "checked" : ""} onchange="window.opener && window.opener.cardSetStoryField('${field}', this.checked)"> ${label}</label>`).join("")}
       </div>
@@ -3824,6 +4452,307 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
       ${headerButton}
     </header>
   ` : "";
+  const documentScript = `
+  <script>
+    (() => {
+      const usePageNumbers = ${fields.pageNumbers ? "true" : "false"};
+      const hasTitlePage = ${fields.titleCard && getTitleCard() ? "true" : "false"};
+      const autoPrint = ${options.autoPrint ? "true" : "false"};
+      function pageLabel(pageIndex) {
+        const firstNumberedPhysicalPage = hasTitlePage ? 3 : 2;
+        if (pageIndex < firstNumberedPhysicalPage) return "";
+        return String(hasTitlePage ? pageIndex - 1 : pageIndex);
+      }
+      function createPage(pageIndex) {
+        const page = document.createElement("section");
+        page.className = "screenplay-page";
+        const label = pageLabel(pageIndex);
+        if (label) {
+          const number = document.createElement("span");
+          number.className = "screenplay-page-number";
+          number.textContent = label + ".";
+          page.appendChild(number);
+        }
+        const content = document.createElement("div");
+        content.className = "screenplay-page-content";
+        page.appendChild(content);
+        return { page, content };
+      }
+      function collectNodes(main) {
+        return Array.from(main.children).flatMap((node) => (
+          node.classList && node.classList.contains("storyline") ? Array.from(node.children) : [node]
+        ));
+      }
+      function isOverflowing(page) {
+        return page.content.scrollHeight > page.content.clientHeight + 2;
+      }
+      function createNextPage(pages) {
+        const page = createPage(pages.children.length + 1);
+        pages.appendChild(page.page);
+        return page;
+      }
+      function storyCardHasContent(card) {
+        return Array.from(card.children).some((child) => {
+          if (child.classList && child.classList.contains("story-card-actions")) return false;
+          if (child.classList && child.classList.contains("story-dialog-body") && !child.children.length) return false;
+          return Boolean(child.textContent.trim() || (child.querySelector && child.querySelector("img, video, audio, canvas")) || child.children.length);
+        });
+      }
+      function cloneStoryCardShell(sourceCard) {
+        const clone = sourceCard.cloneNode(false);
+        const actions = sourceCard.querySelector(":scope > .story-card-actions");
+        if (actions) clone.appendChild(actions.cloneNode(true));
+        return clone;
+      }
+      function appendWholeNode(node, page, pages) {
+        page.content.appendChild(node);
+        if (page.content.children.length > 1 && isOverflowing(page)) {
+          page.content.removeChild(node);
+          page = createNextPage(pages);
+          page.content.appendChild(node);
+        }
+        return page;
+      }
+      function appendStoryNode(node, page, pages) {
+        if (!node.classList || !node.classList.contains("story-card") || !node.querySelector(".story-dialog-body")) {
+          return appendWholeNode(node, page, pages);
+        }
+        return appendDialogStoryCard(node, page, pages);
+      }
+      function appendDialogStoryCard(sourceCard, page, pages) {
+        let card = cloneStoryCardShell(sourceCard);
+        page.content.appendChild(card);
+        Array.from(sourceCard.children)
+          .filter((child) => !(child.classList && child.classList.contains("story-card-actions")))
+          .forEach((child) => {
+            if (child.classList && child.classList.contains("story-dialog-body")) {
+              const result = appendDialogBody(child, sourceCard, page, pages, card);
+              page = result.page;
+              card = result.card;
+            } else {
+              const result = appendStoryCardChild(child, sourceCard, page, pages, card);
+              page = result.page;
+              card = result.card;
+            }
+          });
+        if (!storyCardHasContent(card)) card.remove();
+        return page;
+      }
+      function appendStoryCardChild(child, sourceCard, page, pages, card) {
+        const clone = child.cloneNode(true);
+        card.appendChild(clone);
+        if (isOverflowing(page)) {
+          card.removeChild(clone);
+          if (!storyCardHasContent(card)) card.remove();
+          page = createNextPage(pages);
+          card = cloneStoryCardShell(sourceCard);
+          page.content.appendChild(card);
+          card.appendChild(clone);
+        }
+        return { page, card };
+      }
+      function ensureDialogBody(card, sourceBody) {
+        let body = card.querySelector(":scope > .story-dialog-body");
+        if (!body) {
+          body = sourceBody.cloneNode(false);
+          card.appendChild(body);
+        }
+        return body;
+      }
+      function appendDialogBody(sourceBody, sourceCard, page, pages, card) {
+        let body = ensureDialogBody(card, sourceBody);
+        Array.from(sourceBody.children).forEach((child) => {
+          let result;
+          if (child.classList && child.classList.contains("dialog-unit")) {
+            result = appendDialogUnit(child, sourceBody, sourceCard, page, pages, card, body);
+          } else {
+            result = appendDirectionLine(child, sourceBody, sourceCard, page, pages, card, body);
+          }
+          page = result.page;
+          card = result.card;
+          body = result.body;
+        });
+        if (!body.children.length) body.remove();
+        return { page, card };
+      }
+      function appendDirectionLine(child, sourceBody, sourceCard, page, pages, card, body) {
+        const clone = child.cloneNode(true);
+        body.appendChild(clone);
+        if (isOverflowing(page)) {
+          body.removeChild(clone);
+          if (!body.children.length) body.remove();
+          if (!storyCardHasContent(card)) card.remove();
+          page = createNextPage(pages);
+          card = cloneStoryCardShell(sourceCard);
+          page.content.appendChild(card);
+          body = ensureDialogBody(card, sourceBody);
+          body.appendChild(clone);
+        }
+        return { page, card, body };
+      }
+      function appendDialogUnit(unit, sourceBody, sourceCard, page, pages, card, body) {
+        const whole = unit.cloneNode(true);
+        body.appendChild(whole);
+        if (!isOverflowing(page)) return { page, card, body };
+        body.removeChild(whole);
+
+        const speaker = (unit.querySelector(".dialog-speaker") && unit.querySelector(".dialog-speaker").textContent.trim()) || "";
+        const remaining = splitDialogueIntoSentences(unit);
+        if (!remaining.length) return appendDirectionLine(unit, sourceBody, sourceCard, page, pages, card, body);
+
+        let dialogueStarted = false;
+        let guard = 0;
+        while (remaining.length) {
+          guard += 1;
+          if (guard > 500) break;
+          const speakerLabel = dialogueStarted ? addContinuationToSpeakerLabel(speaker) : speaker;
+          const currentUnit = createDialogContinuationUnit(speakerLabel);
+          body.appendChild(currentUnit);
+          let added = 0;
+
+          while (remaining.length) {
+            const line = createDialogLine(remaining[0]);
+            currentUnit.appendChild(line);
+            if (isOverflowing(page)) {
+              currentUnit.removeChild(line);
+              if (added === 0) {
+                currentUnit.remove();
+                if (!pageHasVisibleStoryContent(page)) {
+                  currentUnit.appendChild(line);
+                  body.appendChild(currentUnit);
+                  remaining.shift();
+                  added = 1;
+                } else {
+                  const moved = moveDialogueToNextPage(sourceBody, sourceCard, pages);
+                  page = moved.page;
+                  card = moved.card;
+                  body = moved.body;
+                }
+              }
+              break;
+            }
+            remaining.shift();
+            added += 1;
+          }
+
+          if (!added) continue;
+
+          if (remaining.length) {
+            if (!fitMoreCueOnPage(body, currentUnit, remaining, page)) {
+              if (!body.children.length) body.remove();
+              if (!storyCardHasContent(card)) card.remove();
+              const moved = moveDialogueToNextPage(sourceBody, sourceCard, pages);
+              page = moved.page;
+              card = moved.card;
+              body = moved.body;
+              continue;
+            }
+            dialogueStarted = true;
+            const moved = moveDialogueToNextPage(sourceBody, sourceCard, pages);
+            page = moved.page;
+            card = moved.card;
+            body = moved.body;
+          } else {
+            dialogueStarted = true;
+          }
+        }
+        return { page, card, body };
+      }
+      function moveDialogueToNextPage(sourceBody, sourceCard, pages) {
+        const page = createNextPage(pages);
+        const card = cloneStoryCardShell(sourceCard);
+        page.content.appendChild(card);
+        const body = ensureDialogBody(card, sourceBody);
+        return { page, card, body };
+      }
+      function pageHasVisibleStoryContent(page) {
+        return Array.from(page.content.children).some((child) => (
+          child.classList && child.classList.contains("story-card") ? storyCardHasContent(child) : Boolean(child.textContent.trim())
+        ));
+      }
+      function fitMoreCueOnPage(body, currentUnit, remaining, page) {
+        addMoreCue(body);
+        if (!isOverflowing(page)) return true;
+        removeMoreCue(body);
+
+        while (currentUnit.querySelector(":scope > .dialog-line")) {
+          const lines = Array.from(currentUnit.querySelectorAll(":scope > .dialog-line"));
+          const lastLine = lines[lines.length - 1];
+          remaining.unshift(lastLine.textContent || "");
+          lastLine.remove();
+          if (!currentUnit.querySelector(":scope > .dialog-line")) {
+            currentUnit.remove();
+            return false;
+          }
+          addMoreCue(body);
+          if (!isOverflowing(page)) return true;
+          removeMoreCue(body);
+        }
+        currentUnit.remove();
+        return false;
+      }
+      function splitDialogueIntoSentences(unit) {
+        const text = Array.from(unit.querySelectorAll(".dialog-line"))
+          .map((line) => line.textContent || "")
+          .join(" ")
+          .replace(/\\s+/g, " ")
+          .trim();
+        if (!text) return [];
+        const matches = text.match(/[^.!?]+(?:[.!?]+["')\\]]*|$)/g);
+        return matches ? matches.map((sentence) => sentence.trim()).filter(Boolean) : [text];
+      }
+      function createDialogContinuationUnit(speaker) {
+        const unit = document.createElement("span");
+        unit.className = "dialog-unit";
+        const header = document.createElement("strong");
+        header.className = "dialog-speaker";
+        header.textContent = speaker;
+        unit.appendChild(header);
+        return unit;
+      }
+      function createDialogLine(text) {
+        const line = document.createElement("span");
+        line.className = "dialog-line";
+        line.textContent = text;
+        return line;
+      }
+      function addMoreCue(body) {
+        removeMoreCue(body);
+        const more = document.createElement("strong");
+        more.className = "dialog-speaker dialog-more";
+        more.textContent = "(MORE)";
+        body.appendChild(more);
+      }
+      function removeMoreCue(body) {
+        const cue = body.querySelector(":scope > .dialog-more");
+        if (cue) cue.remove();
+      }
+      function addContinuationToSpeakerLabel(label) {
+        const text = String(label || "").trim();
+        return /\\(CONT'D\\)\\s*$/i.test(text) ? text : text + " (CONT'D)";
+      }
+      function paginate() {
+        const main = document.getElementById("storyDocument");
+        if (!main || !usePageNumbers || main.querySelector(".story-pages")) return;
+        const nodes = collectNodes(main);
+        if (!nodes.length) return;
+        const pages = document.createElement("div");
+        pages.className = "story-pages";
+        main.textContent = "";
+        main.classList.add("is-paginated");
+        main.appendChild(pages);
+        let page = createPage(1);
+        pages.appendChild(page.page);
+        nodes.forEach((node) => {
+          page = appendStoryNode(node, page, pages);
+        });
+      }
+      window.addEventListener("load", () => {
+        paginate();
+        if (autoPrint) window.setTimeout(() => window.print(), 250);
+      });
+    })();
+  </script>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3832,6 +4761,7 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
   <title>${documentTitle}</title>
   ${includePopInButton ? '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0">' : ""}
   <style>
+    ${pageNumberCss}
     body{margin:0;background:#fbfcfd;color:#1f2a33;font:12pt/1.2 "Courier New",Courier,monospace;}
     .material-symbols-outlined{font-family:"Material Symbols Outlined";font-weight:400;font-style:normal;font-size:22px;line-height:1;letter-spacing:0;text-transform:none;display:inline-flex;white-space:nowrap;word-wrap:normal;direction:ltr;font-feature-settings:"liga";-webkit-font-feature-settings:"liga";-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24;}
     .export-header{height:45px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #cfd8df;background:#f9fbfc;}
@@ -3842,6 +4772,11 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
     .show-assets .popup-assets-panel{display:grid;gap:7px;}
     .popup-assets-panel label{display:flex;align-items:center;gap:7px;min-height:26px;}
     main{max-width:820px;margin:0 auto;padding:24px;}
+    main.is-paginated{max-width:none;margin:0;padding:24px;background:#e8edf1;}
+    .story-pages{display:grid;gap:24px;justify-content:center;}
+    .screenplay-page{position:relative;width:8.5in;min-height:11in;padding:1in 1in .75in 1.5in;background:#fff;color:#1f2a33;box-shadow:0 4px 16px rgba(24,36,47,.16);}
+    .screenplay-page-content{height:9.25in;overflow:visible;}
+    .screenplay-page-number{position:absolute;top:.5in;right:1in;font:12pt/1 "Courier New",Courier,monospace;color:#1f2a33;}
     .popin-button{width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #c8d2da;border-radius:6px;background:#fff;color:#25313a;cursor:pointer;box-shadow:0 1px 2px rgba(24,36,47,.14);}
     .popin-button .material-symbols-outlined{font-size:22px;}
     .empty-story{margin:28px auto;padding:0;color:#5b6872;text-align:left;}
@@ -3850,28 +4785,36 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton) {
     .project-meta{margin:-10px 0 14px;color:#34434e;font-size:12pt;line-height:1.2;text-align:center;overflow-wrap:anywhere;word-break:break-word;}
     .storyline{margin:0 0 18px;padding:0 0 18px;border-bottom:1px solid #dde5eb;}
     .storyline:last-child{border-bottom:0;}
-    .storyline-title{margin:0 0 12px;color:#13756d;font-size:12pt;font-weight:800;text-transform:uppercase;overflow-wrap:anywhere;word-break:break-word;}
     .story-card{margin:0 0 28px;padding:0;overflow-wrap:anywhere;word-break:break-word;}
     .story-card h2{margin:0 0 6px;font-size:12pt;line-height:1.2;text-align:left;}
     .story-card h3{margin:0 0 10px;color:#53616c;font-size:12pt;line-height:1.2;font-weight:650;text-align:left;}
+    .story-card .story-act{margin:0 0 12px;color:#1f2a33;font-size:12pt;line-height:1.2;font-weight:800;text-transform:uppercase;text-align:left;}
     .story-card .story-slug{color:#1f2a33;font-weight:800;text-transform:uppercase;}
     .story-card p{margin:10px 0 0;color:#1f2a33;font-size:12pt;font-weight:400;line-height:1.2;text-align:left;}
     .story-card .story-characters{color:#1f2a33;font-size:12pt;font-weight:400;}
-    .story-card.has-dialog-body .story-dialog-body{margin-top:0;padding-left:112px;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body{margin-top:0;padding-left:112px;padding-right:112px;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body>*+*{margin-top:1.2em;}
     .story-card.has-dialog-body .story-dialog-body .dialog-speaker{display:block;margin:0 0 0 -112px;font-weight:800;line-height:1.2;text-align:center;}
     .story-card.has-dialog-body .story-dialog-body .dialog-unit{display:block;}
-    .story-card.has-dialog-body .story-dialog-body .dialog-line{display:block;text-align:left;}
-    .story-card.has-dialog-body .story-dialog-body .story-body-line{display:block;margin-left:-112px;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body .dialog-line{display:inline;text-align:left;}
+    .story-card.has-dialog-body .story-dialog-body .dialog-line:not(:last-child)::after{content:" ";}
+    .story-card.has-dialog-body .story-dialog-body .story-body-line{display:block;margin-left:-112px;margin-right:-112px;text-align:left;}
+    .story-card .story-transition{margin:18px 0;text-align:right;text-transform:uppercase;}
+    .story-align-left{display:block;text-align:left;}
+    .story-align-center{display:block;text-align:center;}
+    .story-align-right{display:block;text-align:right;}
     .story-card img{display:block;width:100%;max-height:320px;margin:0 0 28px;object-fit:cover;border-radius:0;border:0;}
     .story-footnotes{margin-top:12px;display:grid;gap:8px;}
     .story-note{padding-left:56px;overflow-wrap:anywhere;word-break:break-word;}
     .story-note h3{margin:0 0 6px;color:#34434e;font-size:12pt;}
     .story-note p{margin:0;line-height:1.2;}
+    @media print{body{background:#fff;}.export-header{display:none;}main{max-width:none;margin:0;padding:.5in 0 0;}main.is-paginated{padding:0;background:#fff;}.screenplay-page{margin:0;box-shadow:none;break-after:page;page-break-after:always;}.screenplay-page:last-child{break-after:auto;page-break-after:auto;}.story-card,.story-note{break-inside:avoid-page;}.story-card .story-slug{break-after:avoid;}}
   </style>
+  ${documentScript}
 </head>
 <body>
   ${header}
-  <main>
+  <main id="storyDocument">
     ${bodyHtml}
   </main>
 </body>
@@ -4239,16 +5182,20 @@ function restoreDragStartPositions(pointer, keepIds = new Set(), avoidOverlap = 
     const card = findCard(position.id);
     if (!card) return;
     let next = { x: position.x, y: position.y };
-    if (avoidOverlap) next = findNonOverlappingPosition(card, position.x, position.y);
+    if (avoidOverlap) {
+      next = cardTouchesTimeline(card)
+        ? findOpenTimelinePosition(card, position.x, position.size)
+        : findNonOverlappingPosition(card, position.x, position.y);
+    }
     card.x = next.x;
-    card.y = next.y;
+    card.y = cardTouchesTimeline(card) ? getTimelineTopForSize(getCardSize(card), card.id) : next.y;
     restored.push(card);
     positionCardElement(card);
   });
   return restored;
 }
 
-// Places a dragged card at the requested position and nudges overlaps along the configured card axis.
+// Places a dragged card at the requested position and nudges timeline overlaps horizontally.
 function placeCardAndNudge(card, desiredX, desiredY) {
   card.x = snap(desiredX);
   card.y = isTimelineCard(card) ? getTimelineTopForSize(getCardSize(card), card.id) : snap(desiredY);
@@ -4272,7 +5219,7 @@ function nudgeOverlappingCardsFrom(anchorId) {
       if (other.id === anchor.id) return;
       if (!cardTouchesTimeline(other)) return;
       if (!cardsOverlapWithGap(anchor, other)) return;
-      const next = getAxisNudgePosition(anchor, other, "x");
+      const next = getAxisNudgePosition(anchor, other);
       if (next.x === other.x && next.y === other.y) return;
       other.x = next.x;
       other.y = getTimelineTopForSize(getCardSize(other), other.id);
@@ -4373,30 +5320,19 @@ function cardTouchesTimeline(card) {
   return timelineY >= card.y && timelineY <= card.y + size.height;
 }
 
-// Returns the next position for an overlapped card using only the active story axis.
-function getAxisNudgePosition(anchor, other, axis = getNewCardAxis()) {
+// Returns the next horizontal timeline position for an overlapped card.
+function getAxisNudgePosition(anchor, other) {
   const grid = card_state.preferences.gridSize || card_defaults.gridSize;
   const anchorSize = getCardSize(anchor);
   const otherSize = getCardSize(other);
   const anchorCenter = getCardCenter(anchor);
   const otherCenter = getCardCenter(other);
-
-  if (axis === "y") {
-    const direction = otherCenter.y >= anchorCenter.y ? 1 : -1;
-    return {
-      x: other.x,
-      y: direction > 0
-        ? snap(anchor.y + anchorSize.height + grid)
-        : snap(anchor.y - otherSize.height - grid)
-    };
-  }
-
   const direction = otherCenter.x >= anchorCenter.x ? 1 : -1;
   return {
     x: direction > 0
       ? snap(anchor.x + anchorSize.width + grid)
       : snap(anchor.x - otherSize.width - grid),
-    y: other.y
+    y: getTimelineTopForSize(getCardSize(other), other.id)
   };
 }
 
@@ -4462,10 +5398,12 @@ function resolveOverlapsAfterExpansion(anchorId) {
     let moved = false;
     orderedCards.forEach((card) => {
       if (!positionOverlaps(card.id, card.x, card.y, getCardSize(card))) return;
-      const position = findNonOverlappingPosition(card, card.x, card.y);
+      const position = cardTouchesTimeline(card)
+        ? findOpenTimelinePosition(card, card.x, getCardSize(card))
+        : findNonOverlappingPosition(card, card.x, card.y);
       if (position.x === card.x && position.y === card.y) return;
       card.x = position.x;
-      card.y = position.y;
+      card.y = cardTouchesTimeline(card) ? getTimelineTopForSize(getCardSize(card), card.id) : position.y;
       moved = true;
     });
     if (!moved) return;
@@ -4526,17 +5464,45 @@ function rectsOverlapWithGap(a, b, gap) {
 
 // Supports snap all cards to grid.
 function snapAllCardsToGrid() {
-  card_state.cards.forEach((card) => {
+  const normalizedTimelineIds = normalizeTimelineCardsToGrid();
+  card_state.cards.filter((card) => !normalizedTimelineIds.has(card.id)).forEach((card) => {
     const position = findNonOverlappingPosition(card, card.x, card.y);
     card.x = position.x;
     card.y = position.y;
   });
 }
 
+// Keeps timeline cards on the timeline while resolving load-time grid rounding overlaps.
+function normalizeTimelineCardsToGrid() {
+  const grid = card_state.preferences.gridSize || card_defaults.gridSize;
+  const timelineCards = card_state.cards
+    .filter((card) => isTimelineCard(card) && cardTouchesTimeline(card))
+    .sort((a, b) => a.x - b.x || a.creationIndex - b.creationIndex);
+  const normalizedIds = new Set(timelineCards.map((card) => card.id));
+  let previous = null;
+  timelineCards.forEach((card) => {
+    const size = getCardSize(card);
+    card.x = snap(card.x);
+    if (previous) {
+      const minX = previous.x + getCardSize(previous).width + grid;
+      if (card.x < minX) card.x = snapUp(minX);
+    }
+    card.y = getTimelineTopForSize(size, card.id);
+    previous = card;
+  });
+  return normalizedIds;
+}
+
 // Supports snap.
 function snap(value) {
   const grid = card_state.preferences.gridSize || card_defaults.gridSize;
   return Math.round(value / grid) * grid;
+}
+
+// Snaps a value up to the next grid line.
+function snapUp(value) {
+  const grid = card_state.preferences.gridSize || card_defaults.gridSize;
+  return Math.ceil(value / grid) * grid;
 }
 
 // Supports screen to world.
@@ -4591,8 +5557,11 @@ function focusCard(cardId, options = {}) {
 
 // Returns card size.
 function getCardSize(card) {
-  if (isCardExpanded(card)) return { ...card_sizes.expanded };
-  return { ...card_sizes.compact };
+  const fallback = isCardExpanded(card) ? card_sizes.expanded : card_sizes.compact;
+  return {
+    width: Number(card?.size?.width) || fallback.width,
+    height: Number(card?.size?.height) || fallback.height
+  };
 }
 
 // Returns media preview source.
@@ -4621,6 +5590,78 @@ function normalizeSlugText(value) {
   return String(value || "").toUpperCase().replace(/\s+/g, " ").trimStart();
 }
 
+// Sanitizes user-provided uppercase screenplay tokens.
+function normalizeScreenplayToken(value, options = {}) {
+  const allowColon = Boolean(options.allowColon);
+  const maxLength = Number(options.maxLength) || 48;
+  const pattern = allowColon ? /[^A-Z0-9 ./'&:-]/g : /[^A-Z0-9 ./'&-]/g;
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[\u0000-\u001f\u007f<>[\]{}\\|`~^]/g, " ")
+    .replace(pattern, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength)
+    .trim();
+}
+
+// Sanitizes custom slug time values.
+function normalizeSlugTimeValue(value) {
+  const token = normalizeScreenplayToken(value, { maxLength: 36 });
+  if (!token || token === CUSTOM_SELECT_VALUE) return "";
+  return token;
+}
+
+// Sanitizes transition values and enforces the final colon.
+function normalizeTransitionValue(value) {
+  let token = normalizeScreenplayToken(value, { allowColon: true, maxLength: 48 });
+  if (!token || token === CUSTOM_SELECT_VALUE) return "";
+  token = token.replace(/:+$/g, "").trim();
+  return token ? `${token}:` : "";
+}
+
+// Sanitizes card ACT selector values.
+function normalizeActValue(value) {
+  return CARD_ACTS.includes(value) ? value : "";
+}
+
+// Prompts for a custom select value and returns the sanitized result.
+function promptCustomSelectValue(title, currentValue, sanitizer) {
+  const raw = window.prompt(title, String(currentValue || "").replace(/:$/g, ""));
+  if (raw === null) return "";
+  return sanitizer(raw);
+}
+
+// Renders ACT dropdown options.
+function renderActOptions(currentValue) {
+  const current = normalizeActValue(currentValue);
+  return CARD_ACTS
+    .map((value) => `<option value="${escapeAttr(value)}"${current === value ? " selected" : ""}>${escapeHtml(value || "No ACT")}</option>`)
+    .join("");
+}
+
+// Renders slug time options, preserving a current custom value.
+function renderSlugTimeOptions(card) {
+  const current = getSceneSlugTime(card);
+  const values = [...SLUG_TIMES];
+  if (current && !values.includes(current)) values.push(current);
+  values.push(CUSTOM_SELECT_VALUE);
+  return values
+    .map((value) => `<option value="${escapeAttr(value)}"${current === value ? " selected" : ""}>${escapeHtml(value)}</option>`)
+    .join("");
+}
+
+// Renders transition options, preserving a current custom value.
+function renderTransitionOptions(card) {
+  const current = getSceneTransition(card);
+  const values = [...SCENE_TRANSITIONS];
+  if (current && !values.includes(current)) values.push(current);
+  values.push(CUSTOM_SELECT_VALUE);
+  return values
+    .map((value) => `<option value="${escapeAttr(value)}"${current === value ? " selected" : ""}>${escapeHtml(value || "No Transition")}</option>`)
+    .join("");
+}
+
 // Returns scene slug prefix.
 function getSceneSlugPrefix(card) {
   return SLUG_PREFIXES.includes(card?.fields?.slugPrefix) ? card.fields.slugPrefix : SLUG_PREFIXES[0];
@@ -4628,7 +5669,12 @@ function getSceneSlugPrefix(card) {
 
 // Returns scene slug time.
 function getSceneSlugTime(card) {
-  return SLUG_TIMES.includes(card?.fields?.slugTime) ? card.fields.slugTime : SLUG_TIMES[0];
+  return normalizeSlugTimeValue(card?.fields?.slugTime) || SLUG_TIMES[0];
+}
+
+// Returns scene transition.
+function getSceneTransition(card) {
+  return normalizeTransitionValue(card?.fields?.transition);
 }
 
 // Returns scene slug.
@@ -4662,13 +5708,6 @@ function sanitizeLoadedSupporting(value) {
     "It was a dark and stormy night."
   ];
   return defaults.includes(value) ? "" : value;
-}
-
-// Returns card line color.
-function getCardLineColor(card) {
-  const line = card_state.lines.find((item) => item.id === card.incomingLineId)
-    || card_state.lines.find((item) => item.targetId === card.id && !isNoteCard(findCard(item.sourceId)));
-  return line ? getLineRenderColor(line) : card_defaults.lineColor;
 }
 
 // Returns line render color.
@@ -4764,6 +5803,11 @@ function cardUsesSceneFields(card) {
 // Supports card uses characters.
 function cardUsesCharacters(card) {
   return cardHasFlag(card, "characters");
+}
+
+// Returns whether a card exposes the ACT selector.
+function cardUsesAct(card) {
+  return isSceneCard(card);
 }
 
 // Supports card allows dialogue insert.
@@ -5017,7 +6061,10 @@ function parseStructuredDialogBlocks(text) {
       blocks.push({ type: "text", text: text.slice(start) });
       break;
     }
-    const speaker = sanitizeDialogSpeaker(text.slice(start + DIALOG_OPEN_PREFIX.length, speakerEnd));
+    const marker = text.slice(start + DIALOG_OPEN_PREFIX.length, speakerEnd);
+    const markerParts = marker.split("|");
+    const speaker = sanitizeDialogSpeaker(markerParts[0]);
+    const extension = sanitizeDialogExtension(markerParts[1] || "");
     let bodyStart = speakerEnd + 2;
     if (text[bodyStart] === "\n") bodyStart += 1;
     const close = text.indexOf(DIALOG_CLOSE, bodyStart);
@@ -5027,7 +6074,7 @@ function parseStructuredDialogBlocks(text) {
     }
     let dialogText = text.slice(bodyStart, close);
     if (dialogText.endsWith("\n")) dialogText = dialogText.slice(0, -1);
-    blocks.push({ type: "dialog", speaker, text: dialogText });
+    blocks.push({ type: "dialog", speaker, extension, text: dialogText });
     cursor = close + DIALOG_CLOSE.length;
     if (text[cursor] === "\n") cursor += 1;
   }
@@ -5081,7 +6128,12 @@ function normalizeSupportingBlocks(blocks) {
     if (block.type === "dialog") {
       const speaker = sanitizeDialogSpeaker(block.speaker);
       if (!speaker) return;
-      normalized.push({ type: "dialog", speaker, text: String(block.text || "") });
+      normalized.push({
+        type: "dialog",
+        speaker,
+        extension: sanitizeDialogExtension(block.extension),
+        text: String(block.text || "")
+      });
       return;
     }
     const text = String(block.text || "");
@@ -5100,7 +6152,9 @@ function serializeSupportingBlocks(blocks) {
     .filter((block) => block.type === "dialog" || block.text.length)
     .map((block) => {
       if (block.type !== "dialog") return block.text;
-      return `${DIALOG_OPEN_PREFIX}${sanitizeDialogSpeaker(block.speaker)}]]\n${String(block.text || "")}\n${DIALOG_CLOSE}`;
+      const extension = sanitizeDialogExtension(block.extension);
+      const marker = `${sanitizeDialogSpeaker(block.speaker)}${extension ? `|${extension}` : ""}`;
+      return `${DIALOG_OPEN_PREFIX}${marker}]]\n${String(block.text || "")}\n${DIALOG_CLOSE}`;
     })
     .join("\n");
 }
@@ -5110,9 +6164,17 @@ function sanitizeDialogSpeaker(name) {
   return String(name || "").replace(/[\]\r\n]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Returns supported dialog extension text.
+function sanitizeDialogExtension(value) {
+  const extension = String(value || "").trim().toUpperCase();
+  return SPEECH_EXTENSIONS.includes(extension) ? extension : "";
+}
+
 // Returns the rendered speaker label without changing the stored character name.
-function getDisplayDialogSpeaker(name) {
-  return sanitizeDialogSpeaker(name).toLocaleUpperCase();
+function getDisplayDialogSpeaker(name, extension = "") {
+  const speaker = sanitizeDialogSpeaker(name).toLocaleUpperCase();
+  const cleanExtension = sanitizeDialogExtension(extension);
+  return cleanExtension ? `${speaker} (${cleanExtension})` : speaker;
 }
 
 // Updates one parsed body block from a custom editor input.
@@ -5162,7 +6224,8 @@ function openSpeechDialog(card, indexValue) {
   const block = blocks[index];
   if (!Number.isInteger(index) || block?.type !== "dialog") return;
   card_state.speechEditTarget = { cardId: card.id, index };
-  dom.speechDialogTitle.textContent = getDisplayDialogSpeaker(block.speaker);
+  dom.speechDialogTitle.textContent = getDisplayDialogSpeaker(block.speaker, block.extension);
+  dom.speechExtension.value = sanitizeDialogExtension(block.extension);
   dom.speechDialogText.value = block.text || "";
   dom.speechDialog.showModal();
   requestAnimationFrame(() => dom.speechDialogText.focus());
@@ -5178,6 +6241,7 @@ function saveSpeechDialog(event) {
   const block = blocks[Number(target.index)];
   if (!block || block.type !== "dialog") return;
   recordHistory();
+  block.extension = sanitizeDialogExtension(dom.speechExtension.value);
   block.text = dom.speechDialogText.value;
   card.fields.supporting = serializeSupportingBlocks(blocks);
   dom.speechDialog.close();
@@ -5191,6 +6255,27 @@ function handleSpeechDialogKeydown(event) {
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   saveSpeechDialog(event);
+}
+
+// Opens confirmation before removing a speech bubble.
+function requestSpeechBubbleDelete(card, indexValue) {
+  if (!card?.editable) return;
+  const index = Number(indexValue);
+  const blocks = getSupportingEditorBlocks(card.fields.supporting, card);
+  if (!Number.isInteger(index) || blocks[index]?.type !== "dialog") return;
+  card_state.pendingBubbleDelete = { cardId: card.id, index };
+  dom.bubbleDeleteDialog.showModal();
+}
+
+// Confirms deletion of one speech bubble.
+function confirmBubbleDelete(event) {
+  event.preventDefault();
+  const pending = card_state.pendingBubbleDelete;
+  const card = findCard(pending?.cardId);
+  if (!card) return;
+  deleteSpeechBubble(card, pending.index);
+  card_state.pendingBubbleDelete = null;
+  dom.bubbleDeleteDialog.close();
 }
 
 // Removes one speech bubble from the card body block list.
@@ -5233,7 +6318,7 @@ function getCardBodyTextarea(cardId) {
 // Applies lightweight markup around the selected body text.
 function applyBodyMarkup(card, type, color = "") {
   if (!card?.editable) return;
-  const savedSelection = type === "color" && card_state.textMarkupSelection?.cardId === card.id
+  const savedSelection = card_state.textMarkupSelection?.cardId === card.id
     ? card_state.textMarkupSelection
     : null;
   const savedBlockSelector = savedSelection?.blockIndex !== ""
@@ -5250,6 +6335,9 @@ function applyBodyMarkup(card, type, color = "") {
   const after = textarea.value.slice(end);
   let open = "";
   let close = "";
+  let nextValue = "";
+  let nextStart = start;
+  let nextEnd = end;
   if (type === "bold") {
     open = "**";
     close = "**";
@@ -5259,11 +6347,28 @@ function applyBodyMarkup(card, type, color = "") {
   } else if (type === "color") {
     open = `[color:${safeHex(color, "#000000")}]`;
     close = "[/color]";
+  } else if (type === "indent") {
+    const lineStart = textarea.value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const lineEndIndex = textarea.value.indexOf("\n", end);
+    const lineEnd = lineEndIndex < 0 ? textarea.value.length : lineEndIndex;
+    const target = textarea.value.slice(lineStart, lineEnd);
+    const indented = target.split("\n").map((line) => `     ${line}`).join("\n");
+    nextValue = `${textarea.value.slice(0, lineStart)}${indented}${textarea.value.slice(lineEnd)}`;
+    nextStart = lineStart;
+    nextEnd = lineStart + indented.length;
+  } else if (["align-left", "align-center", "align-right"].includes(type)) {
+    const alignment = type.replace("align-", "");
+    open = `[align:${alignment}]`;
+    close = "[/align]";
   } else {
     return;
   }
   recordHistory();
-  const nextValue = `${before}${open}${selected}${close}${after}`;
+  if (!nextValue) {
+    nextValue = `${before}${open}${selected}${close}${after}`;
+    nextStart = start + open.length;
+    nextEnd = nextStart + selected.length;
+  }
   textarea.value = nextValue;
   if (textarea.dataset.field === "supportingBlock") {
     updateSupportingBlockFromInput(card, textarea);
@@ -5271,8 +6376,8 @@ function applyBodyMarkup(card, type, color = "") {
     card.fields.supporting = nextValue;
   }
   textarea.focus();
-  textarea.selectionStart = start + open.length;
-  textarea.selectionEnd = start + open.length + selected.length;
+  textarea.selectionStart = nextStart;
+  textarea.selectionEnd = nextEnd;
   card_state.textMarkupSelection = null;
   markDirty();
   renderStory();
@@ -5311,6 +6416,20 @@ function openCharactersDialog() {
   card_state.characterEditOriginal = "";
   dom.charactersDialog.showModal();
   requestAnimationFrame(() => dom.characterNameInput.focus());
+}
+
+// Commits pending character input when Done closes the character manager.
+function handleCharactersDialogClose() {
+  if (dom.charactersDialog.returnValue !== "default") {
+    dom.characterNameInput.value = "";
+    card_state.characterEditOriginal = "";
+    return;
+  }
+  if (card_state.characterEditOriginal) {
+    commitCharacterNameEdit();
+    return;
+  }
+  if (dom.characterNameInput.value.trim()) addCharacterFromDialog();
 }
 
 // Renders character list UI markup or state.
@@ -5386,18 +6505,29 @@ function copySelectedCharacter() {
   renderAll();
 }
 
-// Deletes selected character.
-function deleteSelectedCharacter() {
+// Opens delete confirmation for the selected character.
+function requestSelectedCharacterDelete() {
   if (!commitCharacterNameEdit()) return;
   const selected = dom.characterList.value;
+  if (!selected) return;
+  card_state.pendingCharacterDeleteName = selected;
+  dom.characterDeleteDialog.showModal();
+}
+
+// Deletes selected character after confirmation.
+function confirmCharacterDelete(event) {
+  event.preventDefault();
+  const selected = card_state.pendingCharacterDeleteName;
   if (!selected) return;
   recordHistory();
   deleteCharacterByName(selected);
   dom.characterNameInput.value = "";
   card_state.characterEditOriginal = "";
+  card_state.pendingCharacterDeleteName = "";
   renderCharacterList();
   markDirty();
   renderAll();
+  dom.characterDeleteDialog.close();
 }
 
 // Deletes a character from the project, its character card, and all card references.
@@ -5425,6 +6555,20 @@ function handleCharacterNameKeydown(event) {
 function updateCharacterDialogActions() {
   if (!dom.deleteCharacter) return;
   dom.deleteCharacter.hidden = !dom.characterList.value;
+}
+
+// Jumps from the character manager to the selected character card on the canvas.
+function jumpToSelectedCharacterCard() {
+  if (!commitCharacterNameEdit()) return;
+  const selected = dom.characterList.value;
+  if (!selected) return;
+  const card = findCharacterCardByName(selected) || createCharacterCard(selected);
+  if (!card) return;
+  dom.charactersDialog.close("cancel");
+  selectCard(card.id);
+  card_state.raisedCardId = card.id;
+  centerCanvasOnCard(card);
+  renderCards();
 }
 
 // Commits a pending character rename from the character manager input.
@@ -5474,7 +6618,7 @@ function normalizeCharacterNameKey(name) {
 }
 
 // Creates character card.
-function createCharacterCard(name) {
+function createCharacterCard(name, options = {}) {
   if (findCharacterCardByName(name)) return null;
   const position = getCharacterCardPosition();
   return createCardAt(position.x, position.y, {
@@ -5482,7 +6626,15 @@ function createCharacterCard(name) {
     fields: { header: name },
     characterName: name,
     skipHistory: true,
+    skipDirty: Boolean(options.skipDirty),
     quiet: true
+  });
+}
+
+// Ensures every project character has a matching character card.
+function ensureCharacterCards(options = {}) {
+  card_state.characters.forEach((name) => {
+    if (!findCharacterCardByName(name)) createCharacterCard(name, options);
   });
 }
 
@@ -5507,11 +6659,10 @@ function getCharacterCardPosition() {
     y: screenToWorld(dom.canvasViewport.getBoundingClientRect().left + 120, dom.canvasViewport.getBoundingClientRect().top + 120).y
   };
   const index = card_state.cards.filter((card) => isCharacterCard(card)).length;
-  const xAxis = getNewCardAxis() === "x";
   const leftOfStory = base.x - card_sizes.expanded.width * 2 - grid;
   return findNonOverlappingPosition(null,
-    xAxis ? leftOfStory : leftOfStory - index * (card_sizes.expanded.width + grid),
-    xAxis ? base.y + index * (card_sizes.expanded.height + grid) : base.y,
+    leftOfStory,
+    base.y + card_sizes.compact.height + grid + index * (card_sizes.expanded.height + grid),
     card_sizes.expanded
   );
 }
@@ -5586,20 +6737,30 @@ function formatDialogBodyText(value, card) {
         if (!block.text.trim()) return "";
         return `<span class="story-body-line dialog-text-block">${formatBodyText(block.text)}</span>`;
       }
-      const speech = String(block.text || "")
-        .split("\n")
-        .map((line) => (line.trim()
-          ? `<span class="dialog-line">${applyInlineBodyMarkup(escapeHtml(line))}</span>`
-          : '<span class="dialog-line dialog-blank-line">&nbsp;</span>'))
-        .join("");
-      return `<span class="dialog-unit"><strong class="dialog-speaker">${escapeHtml(getDisplayDialogSpeaker(block.speaker))}</strong>${speech}</span>`;
+      const speechText = normalizeDialogSpeechText(block.text);
+      const speech = speechText
+        ? `<span class="dialog-line">${applyInlineBodyMarkup(escapeHtml(speechText))}</span>`
+        : "";
+      return `<span class="dialog-unit"><strong class="dialog-speaker">${escapeHtml(getDisplayDialogSpeaker(block.speaker, block.extension))}</strong>${speech}</span>`;
     })
     .join("");
+}
+
+// Normalizes dialogue speech for screenplay output so extracted hard line breaks wrap naturally.
+function normalizeDialogSpeechText(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // Applies supported body markup after text has already been escaped.
 function applyInlineBodyMarkup(html) {
   return html
+    .replace(/\[align:(left|center|right)\]([\s\S]*?)\[\/align\]/g, '<span class="story-align-$1">$2</span>')
     .replace(/\[color:(#[0-9a-fA-F]{6})\]([\s\S]*?)\[\/color\]/g, '<span style="color:$1">$2</span>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*<][^*]*?)\*/g, "$1<em>$2</em>");
@@ -5608,6 +6769,7 @@ function applyInlineBodyMarkup(html) {
 // Supports plain body text.
 function plainBodyText(value) {
   return String(value || "")
+    .replace(/\[align:(?:left|center|right)\]([\s\S]*?)\[\/align\]/g, "$1")
     .replace(/\[color:#[0-9a-fA-F]{6}\]([\s\S]*?)\[\/color\]/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1$2");
@@ -5618,14 +6780,11 @@ function plainDialogBodyText(value, card) {
   return parseSupportingBlocks(value, card)
     .map((block) => {
       if (block.type !== "dialog") return plainBodyText(block.text);
-      const speech = plainBodyText(block.text)
-        .split("\n")
-        .map((line) => (line.trim() ? `        ${line}` : ""))
-        .join("\n");
-      return `${getDisplayDialogSpeaker(block.speaker)}${speech ? `\n${speech}` : ""}`;
+      const speech = plainBodyText(normalizeDialogSpeechText(block.text)).trim();
+      return `${getDisplayDialogSpeaker(block.speaker, block.extension)}${speech ? `\n        ${speech}` : ""}`;
     })
     .filter((part) => part.trim())
-    .join("\n");
+    .join("\n\n");
 }
 
 // Supports clamp.
