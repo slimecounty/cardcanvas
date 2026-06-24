@@ -5388,8 +5388,10 @@ function findNonOverlappingPosition(card, desiredX, desiredY, forcedSize) {
 function resolveOverlapsAfterExpansion(anchorId) {
   const anchor = findCard(anchorId);
   if (!anchor) return;
+  const anchorIsTimeline = cardTouchesTimeline(anchor);
   const orderedCards = card_state.cards
     .filter((card) => card.id !== anchorId)
+    .filter((card) => anchorIsTimeline || !cardTouchesTimeline(card))
     .sort((a, b) => distance(getCardCenter(a), getCardCenter(anchor)) - distance(getCardCenter(b), getCardCenter(anchor))
       || a.creationIndex - b.creationIndex);
   const maxPasses = Math.max(2, card_state.cards.length + 1);
@@ -6660,9 +6662,10 @@ function getCharacterCardPosition() {
   };
   const index = card_state.cards.filter((card) => isCharacterCard(card)).length;
   const leftOfStory = base.x - card_sizes.expanded.width * 2 - grid;
+  const topBelowTimeline = snapUp(base.y + card_sizes.compact.height + grid);
   return findNonOverlappingPosition(null,
     leftOfStory,
-    base.y + card_sizes.compact.height + grid + index * (card_sizes.expanded.height + grid),
+    topBelowTimeline + index * (card_sizes.expanded.height + grid),
     card_sizes.expanded
   );
 }
