@@ -1,6 +1,6 @@
 # card canvas
 
-A digital index-card-driven storyboard app for building stories visually and generating a traditionally formatted screenplay-style output.
+AI slop - digital index-card-driven storyboard app for building stories visually and generating a traditionally formatted screenplay-style output.
 
 **Live App:** https://slimecounty.github.io/cardcanvas/
 
