@@ -13,7 +13,7 @@ const card_defaults = {
   namingSequence: "number"
 };
 
-const DEFAULT_PROJECT_PATH = "night-of-the-living-dead-1968.json";
+const DEFAULT_PROJECT_PATH = "evil-dead-2013.json";
 const PROJECT_TARGET_ID = "project_title";
 const TITLE_CARD_TYPE = "title";
 
@@ -155,11 +155,9 @@ const card_state = {
   raisedCardId: null,
   selectionTool: "grab",
   shiftLassoActive: false,
-  lastCardDoubleClick: null,
   pendingDeleteId: null,
   pointer: null,
   paneResize: null,
-  lastTouchTap: null,
   lastCardPress: null,
   storyPress: null,
   touchPoints: new Map(),
@@ -443,7 +441,6 @@ function bindEvents() {
 
   dom.canvasViewport.addEventListener("pointerdown", handleCanvasTouchPointerDown, { capture: true });
   dom.canvasViewport.addEventListener("pointerdown", handleCanvasPointerDown);
-  dom.canvasViewport.addEventListener("dblclick", handleCanvasDoubleClick);
   dom.canvasViewport.addEventListener("wheel", handleCanvasWheel, { passive: false });
 
   dom.cardsLayer.addEventListener("pointerdown", handleCardPointerDown);
@@ -1358,7 +1355,6 @@ function handleCardClick(event) {
 
   if (!actionButton) {
     if (event.detail >= 2 && !isInteractiveTarget(event.target)) {
-      markCardDoubleClick(event);
       expandCardForEditing(card);
     }
     return;
@@ -1611,19 +1607,9 @@ function handleCardDoubleClick(event) {
   if (!cardEl || isInteractiveTarget(event.target)) return;
   event.stopPropagation();
   event.preventDefault();
-  markCardDoubleClick(event);
   const card = findCard(cardEl.dataset.cardId);
   if (!card) return;
   expandCardForEditing(card);
-}
-
-// Records a card double-click so the canvas handler cannot also create a new card.
-function markCardDoubleClick(event) {
-  card_state.lastCardDoubleClick = {
-    time: Date.now(),
-    x: event.clientX,
-    y: event.clientY
-  };
 }
 
 // Opens a card, optionally entering edit mode based on user preference.
@@ -1798,7 +1784,6 @@ function handleCompactCardDoublePress(event, card) {
   };
   if (!isDoublePress) return false;
   card_state.lastCardPress = null;
-  markCardDoubleClick(event);
   openCard(card);
   return true;
 }
@@ -1896,28 +1881,6 @@ function clearCardSelection() {
   card_state.selectedCardIds = [];
   card_state.raisedCardId = null;
   updateCardSelectionClasses();
-}
-
-// Handles canvas double click events and updates related state.
-function handleCanvasDoubleClick(event) {
-  if (event.defaultPrevented || isRecentCardDoubleClick(event)) return;
-  if (!isCanvasGridTarget(event.target)) return;
-  if (isMobileMode()) return;
-  if (isLassoMode()) return;
-  event.preventDefault();
-  const point = screenToWorld(event.clientX, event.clientY);
-  createCardAt(point.x, point.y);
-}
-
-// Returns whether a canvas double-click is the trailing event from opening a card.
-function isRecentCardDoubleClick(event) {
-  const last = card_state.lastCardDoubleClick;
-  if (!last) return false;
-  const recent = Date.now() - last.time < 600;
-  const close = Math.hypot(event.clientX - last.x, event.clientY - last.y) < 40;
-  if (recent && close) return true;
-  if (!recent) card_state.lastCardDoubleClick = null;
-  return false;
 }
 
 // Confirms a pointer target is the card grid itself, not an overlay, control, card, or pane chrome.
@@ -2117,9 +2080,6 @@ function handlePointerUp(event) {
 
   if (pointer.type === "pan" && pointer.pointerId === event.pointerId) {
     dom.canvasViewport.classList.remove("is-panning");
-    if (pointer.pointerType === "touch" && !pointer.moved) {
-      handleTouchTap(event, pointer.startWorld);
-    }
     clearPointer();
   }
 
@@ -2210,21 +2170,6 @@ function clearLongPressTimer(pointer = card_state.pointer) {
   if (!pointer?.longPressTimer) return;
   window.clearTimeout(pointer.longPressTimer);
   pointer.longPressTimer = null;
-}
-
-// Handles touch tap events and updates related state.
-function handleTouchTap(event, worldPoint) {
-  const now = Date.now();
-  const tap = { time: now, x: event.clientX, y: event.clientY };
-  const last = card_state.lastTouchTap;
-  card_state.lastTouchTap = tap;
-  if (!last) return;
-  const closeEnough = Math.hypot(tap.x - last.x, tap.y - last.y) < 28;
-  if (now - last.time < 360 && closeEnough) {
-    card_state.lastTouchTap = null;
-    if (isLassoMode() || isMobileMode()) return;
-    createCardAt(worldPoint.x, worldPoint.y);
-  }
 }
 
 // Creates card at.
@@ -2426,7 +2371,7 @@ function copyCard(cardId) {
 function getNextCardTitleIndex(cardType) {
   const used = new Set();
   card_state.cards.forEach((card) => {
-    if (getCardType(card) !== cardType || card.fields.header) return;
+    if (getCardType(card) !== cardType) return;
     const index = getGeneratedTitleIndex(card, cardType);
     if (index) used.add(index);
   });
@@ -3057,9 +3002,9 @@ function collectStoryPaginationNodes(container) {
   ));
 }
 
-// Appends one story node to paginated screenplay pages, splitting dialogue when needed.
+// Appends one story node to paginated screenplay pages, splitting screenplay text when needed.
 function appendStoryNodeToPages(node, page, pages, hasTitlePage) {
-  if (!node.classList?.contains("story-card") || !node.querySelector(".story-dialog-body")) {
+  if (!node.classList?.contains("story-card")) {
     return appendWholeStoryNodeToPages(node, page, pages, hasTitlePage);
   }
   return appendDialogStoryCardToPages(node, page, pages, hasTitlePage);
@@ -3109,8 +3054,16 @@ function storyCardHasContent(card) {
   });
 }
 
-// Appends a non-dialog card child, moving the whole child when it does not fit.
+// Appends a non-dialog card child, splitting body text at sentence boundaries when needed.
 function appendStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card) {
+  if (isSplittableStoryTextNode(child)) {
+    return appendSplittableStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card);
+  }
+  return appendUnsplittableStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card);
+}
+
+// Appends a non-dialog card child as an indivisible page item.
+function appendUnsplittableStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card) {
   const clone = child.cloneNode(true);
   card.appendChild(clone);
   if (isPageOverflowing(page)) {
@@ -3121,6 +3074,25 @@ function appendStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePag
     page.content.appendChild(card);
     card.appendChild(clone);
   }
+  return { page, card };
+}
+
+// Appends a body text child in screenplay-safe sentence chunks.
+function appendSplittableStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card) {
+  const whole = child.cloneNode(true);
+  card.appendChild(whole);
+  if (!isPageOverflowing(page)) return { page, card };
+  card.removeChild(whole);
+
+  const chunks = splitTextNodeIntoSentences(child);
+  if (chunks.length <= 1) {
+    return appendUnsplittableStoryCardChildToPages(child, sourceCard, page, pages, hasTitlePage, card);
+  }
+  chunks.forEach((chunk) => {
+    const piece = child.cloneNode(false);
+    piece.textContent = chunk;
+    ({ page, card } = appendUnsplittableStoryCardChildToPages(piece, sourceCard, page, pages, hasTitlePage, card));
+  });
   return { page, card };
 }
 
@@ -3148,8 +3120,29 @@ function ensureDialogBodyForCard(card, sourceBody) {
   return body;
 }
 
-// Appends a direction/action body line without splitting it.
+// Appends a direction/action body line, allowing page breaks at sentence boundaries.
 function appendDirectionLineToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body) {
+  if (isSplittableStoryTextNode(child)) {
+    const whole = child.cloneNode(true);
+    body.appendChild(whole);
+    if (!isPageOverflowing(page)) return { page, card, body };
+    body.removeChild(whole);
+
+    const chunks = splitTextNodeIntoSentences(child);
+    if (chunks.length > 1) {
+      chunks.forEach((chunk) => {
+        const piece = child.cloneNode(false);
+        piece.textContent = chunk;
+        ({ page, card, body } = appendUnsplittableDirectionLineToPages(piece, sourceBody, sourceCard, page, pages, hasTitlePage, card, body));
+      });
+      return { page, card, body };
+    }
+  }
+  return appendUnsplittableDirectionLineToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body);
+}
+
+// Appends a direction/action body line as an indivisible page item.
+function appendUnsplittableDirectionLineToPages(child, sourceBody, sourceCard, page, pages, hasTitlePage, card, body) {
   const clone = child.cloneNode(true);
   body.appendChild(clone);
   if (isPageOverflowing(page)) {
@@ -3163,6 +3156,24 @@ function appendDirectionLineToPages(child, sourceBody, sourceCard, page, pages, 
     body.appendChild(clone);
   }
   return { page, card, body };
+}
+
+// Returns whether a story text node can be split across screenplay pages.
+function isSplittableStoryTextNode(node) {
+  return Boolean(
+    node?.textContent?.trim()
+    && !node.querySelector?.("img, video, audio, canvas")
+    && (node.classList?.contains("story-body-line") || node.dataset?.storyField === "supporting")
+  );
+}
+
+// Splits rendered body/action text into sentence-sized pagination chunks.
+function splitTextNodeIntoSentences(node) {
+  const text = String(node?.textContent || "").replace(/\s+/g, " ").trim();
+  if (!text) return [];
+  return text.match(/[^.!?]+(?:[.!?]+["')\]]*|$)/g)
+    ?.map((sentence) => sentence.trim())
+    .filter(Boolean) || [text];
 }
 
 // Appends a dialogue unit, splitting at sentence boundaries when it crosses a page.
@@ -4532,7 +4543,7 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
         return page;
       }
       function appendStoryNode(node, page, pages) {
-        if (!node.classList || !node.classList.contains("story-card") || !node.querySelector(".story-dialog-body")) {
+        if (!node.classList || !node.classList.contains("story-card")) {
           return appendWholeNode(node, page, pages);
         }
         return appendDialogStoryCard(node, page, pages);
@@ -4557,6 +4568,12 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
         return page;
       }
       function appendStoryCardChild(child, sourceCard, page, pages, card) {
+        if (isSplittableStoryTextNode(child)) {
+          return appendSplittableStoryCardChild(child, sourceCard, page, pages, card);
+        }
+        return appendUnsplittableStoryCardChild(child, sourceCard, page, pages, card);
+      }
+      function appendUnsplittableStoryCardChild(child, sourceCard, page, pages, card) {
         const clone = child.cloneNode(true);
         card.appendChild(clone);
         if (isOverflowing(page)) {
@@ -4567,6 +4584,23 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
           page.content.appendChild(card);
           card.appendChild(clone);
         }
+        return { page, card };
+      }
+      function appendSplittableStoryCardChild(child, sourceCard, page, pages, card) {
+        const whole = child.cloneNode(true);
+        card.appendChild(whole);
+        if (!isOverflowing(page)) return { page, card };
+        card.removeChild(whole);
+
+        const chunks = splitTextNodeIntoSentences(child);
+        if (chunks.length <= 1) return appendUnsplittableStoryCardChild(child, sourceCard, page, pages, card);
+        chunks.forEach((chunk) => {
+          const piece = child.cloneNode(false);
+          piece.textContent = chunk;
+          const result = appendUnsplittableStoryCardChild(piece, sourceCard, page, pages, card);
+          page = result.page;
+          card = result.card;
+        });
         return { page, card };
       }
       function ensureDialogBody(card, sourceBody) {
@@ -4594,6 +4628,28 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
         return { page, card };
       }
       function appendDirectionLine(child, sourceBody, sourceCard, page, pages, card, body) {
+        if (isSplittableStoryTextNode(child)) {
+          const whole = child.cloneNode(true);
+          body.appendChild(whole);
+          if (!isOverflowing(page)) return { page, card, body };
+          body.removeChild(whole);
+
+          const chunks = splitTextNodeIntoSentences(child);
+          if (chunks.length > 1) {
+            chunks.forEach((chunk) => {
+              const piece = child.cloneNode(false);
+              piece.textContent = chunk;
+              const result = appendUnsplittableDirectionLine(piece, sourceBody, sourceCard, page, pages, card, body);
+              page = result.page;
+              card = result.card;
+              body = result.body;
+            });
+            return { page, card, body };
+          }
+        }
+        return appendUnsplittableDirectionLine(child, sourceBody, sourceCard, page, pages, card, body);
+      }
+      function appendUnsplittableDirectionLine(child, sourceBody, sourceCard, page, pages, card, body) {
         const clone = child.cloneNode(true);
         body.appendChild(clone);
         if (isOverflowing(page)) {
@@ -4607,6 +4663,19 @@ function buildStoryDocumentHtml(bodyHtml, includePopInButton, options = {}) {
           body.appendChild(clone);
         }
         return { page, card, body };
+      }
+      function isSplittableStoryTextNode(node) {
+        return Boolean(
+          node && node.textContent && node.textContent.trim()
+          && !(node.querySelector && node.querySelector("img, video, audio, canvas"))
+          && ((node.classList && node.classList.contains("story-body-line")) || (node.dataset && node.dataset.storyField === "supporting"))
+        );
+      }
+      function splitTextNodeIntoSentences(node) {
+        const text = String((node && node.textContent) || "").replace(/\\s+/g, " ").trim();
+        if (!text) return [];
+        const matches = text.match(/[^.!?]+(?:[.!?]+["')\\]]*|$)/g);
+        return matches ? matches.map((sentence) => sentence.trim()).filter(Boolean) : [text];
       }
       function appendDialogUnit(unit, sourceBody, sourceCard, page, pages, card, body) {
         const whole = unit.cloneNode(true);
@@ -5951,10 +6020,24 @@ function lettersToNumber(value) {
 
 // Returns generated title index.
 function getGeneratedTitleIndex(card, cardType) {
-  if (Number(card?.titleIndex) > 0) return Number(card.titleIndex);
+  const normalizedType = normalizeCardType(cardType);
+  const header = String(card?.fields?.header || "").trim();
+  const placeholder = String(card?.titlePlaceholder || "").trim();
+  const titleIndex = Number(card?.titleIndex) || 0;
+  const headerIndex = parseGeneratedTitleIndex(header, normalizedType);
+  if (headerIndex) return headerIndex;
+  const placeholderIndex = parseGeneratedTitleIndex(placeholder, normalizedType);
+  if (!header && placeholderIndex) return placeholderIndex;
+  if (header && placeholder && header === placeholder && placeholderIndex) return placeholderIndex;
+  if (!header && titleIndex > 0) return titleIndex;
+  return 0;
+}
+
+// Parses a title that still follows the generated naming pattern.
+function parseGeneratedTitleIndex(value, cardType) {
   const prefix = cardType === "scene" ? getNamingPrefix() : card_type_flags[normalizeCardType(cardType)].defaultPrefix;
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = String(card?.titlePlaceholder || "").match(new RegExp(`^${escapedPrefix}\\s+([0-9]+|[A-Z]+)$`, "i"));
+  const match = String(value || "").trim().match(new RegExp(`^${escapedPrefix}\\s+([0-9]+|[A-Z]+)$`, "i"));
   if (!match) return 0;
   return /^[0-9]+$/.test(match[1]) ? Number(match[1]) : lettersToNumber(match[1]);
 }
