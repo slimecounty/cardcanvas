@@ -16,6 +16,8 @@
   --header-h: 45px;
   --pane-header-h: 48px;
   --radius: 8px;
+  --cursor-custom: url("img/nesticle_cursor_160.png") 3 2, auto;
+  --cursor-custom-pointer: url("img/nesticle_cursor_160.png") 3 2, pointer;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -35,6 +37,7 @@ body {
   color: var(--ink);
   font-size: 14px;
   letter-spacing: 0;
+  cursor: var(--cursor-custom);
 }
 
 button,
@@ -46,6 +49,31 @@ select {
 
 button {
   border: 0;
+}
+
+button:not(:disabled),
+summary,
+label,
+[role="button"],
+select,
+option,
+input[type="checkbox"],
+input[type="radio"],
+input[type="color"],
+input[type="file"],
+.menu-panel,
+.menu-panel *,
+.zoom-overlay,
+.zoom-overlay *,
+.history-overlay,
+.history-overlay * {
+  cursor: var(--cursor-custom-pointer);
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+  cursor: var(--cursor-custom);
 }
 
 svg {
@@ -122,7 +150,7 @@ svg {
   border-radius: 0;
   background: transparent;
   color: #1f2a33;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .menu-button:hover,
@@ -144,7 +172,7 @@ svg {
   border: 1px solid #c8d2da;
   color: #25313a;
   background: #fff;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .75) inset;
 }
 
@@ -225,7 +253,7 @@ select:focus-visible {
   color: var(--ink);
   text-align: left;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .menu-panel button .material-symbols-outlined,
@@ -258,7 +286,7 @@ select:focus-visible {
 
 .menu-panel button:disabled {
   color: #9aa5ad;
-  cursor: default;
+  cursor: var(--cursor-custom);
 }
 
 .menu-panel button:disabled:hover {
@@ -280,7 +308,7 @@ select:focus-visible {
   padding: 0 10px;
   border-radius: 6px;
   color: var(--ink);
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
   user-select: none;
 }
 
@@ -303,7 +331,7 @@ select:focus-visible {
   padding: 0 10px;
   border-radius: 6px;
   color: var(--ink);
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .menu-check:hover,
@@ -454,7 +482,7 @@ select:focus-visible {
   color: #22313b;
   text-align: center;
   font-weight: 700;
-  cursor: default;
+  cursor: var(--cursor-custom);
 }
 
 .window-pane.is-focused .pane-header {
@@ -538,7 +566,7 @@ select:focus-visible {
   background: #fff;
   border: 1px solid #d5dee5;
   color: #35434d;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .field-toggles input {
@@ -623,7 +651,7 @@ select:focus-visible {
 
 .history-overlay .icon-button:disabled {
   opacity: .38;
-  cursor: default;
+  cursor: var(--cursor-custom);
 }
 
 .line-layer {
@@ -942,7 +970,7 @@ select:focus-visible {
   overflow: hidden;
   background: #bdbdbd;
   color: #6f6f6f;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
   box-shadow: none;
 }
 
@@ -1047,7 +1075,7 @@ select:focus-visible {
   border-radius: 6px;
   background: #f8fafb;
   color: #1f2a33;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
   overflow-wrap: anywhere;
 }
 
@@ -1075,7 +1103,7 @@ select:focus-visible {
   background: transparent;
   color: var(--ink);
   text-align: left;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .character-picker-inherit {
@@ -1157,7 +1185,7 @@ select:focus-visible {
   border-radius: 999px;
   background: rgba(255, 255, 255, .18);
   color: rgba(52, 67, 78, .28);
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .dialog-insert-slot:hover,
@@ -1209,11 +1237,11 @@ select:focus-visible {
   color: #1f2a33;
   box-shadow: 0 1px 1px rgba(20, 31, 40, .08);
   text-align: left;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .card-body .dialog-bubble-card:disabled {
-  cursor: default;
+  cursor: var(--cursor-custom);
 }
 
 .dialog-bubble-text-display {
@@ -1242,7 +1270,7 @@ select:focus-visible {
   border-radius: 999px;
   background: rgba(255, 255, 255, .5);
   color: rgba(179, 38, 30, .46);
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
   opacity: .58;
 }
 
@@ -1719,7 +1747,7 @@ select:focus-visible {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .story-copy-button {
@@ -2054,7 +2082,7 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .radio-stack input {
@@ -2091,7 +2119,7 @@ select:focus-visible {
   gap: 6px;
   color: #34434e;
   font-weight: 650;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .check-row input {
@@ -2123,7 +2151,7 @@ select:focus-visible {
   border-radius: 0;
   color: #34434e;
   font-weight: 650;
-  cursor: pointer;
+  cursor: var(--cursor-custom-pointer);
 }
 
 .segmented-field input {
@@ -2169,7 +2197,7 @@ select:focus-visible {
     background: transparent;
     color: #34434e;
     font-weight: 700;
-    cursor: pointer;
+    cursor: var(--cursor-custom-pointer);
   }
 
   .mobile-tab.is-active {
@@ -2253,7 +2281,7 @@ select:focus-visible {
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-width: none;
-    cursor: default;
+    cursor: var(--cursor-custom);
     touch-action: pan-y;
     background-color: #fff;
     background-image: none;
@@ -2303,7 +2331,7 @@ select:focus-visible {
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    cursor: default;
+    cursor: var(--cursor-custom);
     overflow: visible;
   }
 

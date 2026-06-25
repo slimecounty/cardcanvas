@@ -893,14 +893,17 @@ function centerCanvasOnCard(card) {
 }
 
 // Renders canvas transform, cards, lines, story output, and menu state.
-function renderAll() {
+function renderAll(options = {}) {
   ensureTitleCard({ skipDirty: true });
   refreshConnectionFlags();
   applyOutputRenderPreference();
   renderCanvasTransform();
   renderCards();
   renderLines();
-  renderStory();
+  renderStory({
+    preserveScroll: Boolean(options.preserveStoryScroll),
+    immediatePagination: Boolean(options.immediateStoryPagination)
+  });
   updateMenuState();
   dom.cardCount.value = String(card_state.cards.length);
 }
@@ -2931,25 +2934,56 @@ function pointsEqual(a, b) {
 }
 
 // Renders story UI markup or state.
-function renderStory() {
+function renderStory(options = {}) {
+  const scrollSnapshot = options.preserveScroll ? captureStoryScroll() : null;
   const storylines = buildStorylines();
   const fields = getActiveStoryFields();
   updateMobileStoryProjectTitle();
   dom.storyCount.value = String(storylines.reduce((sum, group) => sum + group.cards.length, 0));
   dom.windowText.classList.toggle("show-page-numbers", Boolean(fields.pageNumbers));
   dom.storyOutput.innerHTML = getStoryBodyHtml(storylines, { liveEditing: true });
-  scheduleStoryPagination(fields);
+  if (options.immediatePagination && fields.pageNumbers && shouldShowOutputRender()) {
+    cancelStoryPagination();
+    paginateStoryOutput(dom.storyOutput, fields);
+    restoreStoryScroll(scrollSnapshot);
+  } else {
+    restoreStoryScroll(scrollSnapshot);
+    scheduleStoryPagination(fields, scrollSnapshot);
+  }
   refreshTextPopout();
 }
 
+// Captures the story pane scroll position before DOM replacement.
+function captureStoryScroll() {
+  if (!dom.storyOutput) return null;
+  return {
+    top: dom.storyOutput.scrollTop,
+    left: dom.storyOutput.scrollLeft
+  };
+}
+
+// Restores the story pane scroll position after rendering and pagination.
+function restoreStoryScroll(snapshot) {
+  if (!snapshot || !dom.storyOutput) return;
+  const apply = () => {
+    const maxTop = Math.max(0, dom.storyOutput.scrollHeight - dom.storyOutput.clientHeight);
+    const maxLeft = Math.max(0, dom.storyOutput.scrollWidth - dom.storyOutput.clientWidth);
+    dom.storyOutput.scrollTop = Math.min(snapshot.top, maxTop);
+    dom.storyOutput.scrollLeft = Math.min(snapshot.left, maxLeft);
+  };
+  apply();
+  requestAnimationFrame(apply);
+}
+
 // Schedules expensive screenplay pagination outside the immediate render path.
-function scheduleStoryPagination(fields = getActiveStoryFields()) {
+function scheduleStoryPagination(fields = getActiveStoryFields(), scrollSnapshot = null) {
   cancelStoryPagination();
   if (!fields.pageNumbers || !shouldShowOutputRender()) return;
   const run = () => {
     card_state.storyPaginationHandle = null;
     card_state.storyPaginationHandleType = "";
     paginateStoryOutput(dom.storyOutput, fields);
+    restoreStoryScroll(scrollSnapshot);
   };
   if ("requestIdleCallback" in window) {
     card_state.storyPaginationHandleType = "idle";
@@ -3788,7 +3822,7 @@ function commitStoryEditor(editor, cancel = false) {
   if (!editor || editor.dataset.committed) return;
   editor.dataset.committed = "true";
   if (cancel) {
-    renderStory();
+    finishStoryEditorWithoutRender(editor);
     return;
   }
 
@@ -3796,7 +3830,7 @@ function commitStoryEditor(editor, cancel = false) {
   const value = getStoryEditedValue(editor).trim();
   const originalValue = editor.dataset.originalValue || "";
   if (value === originalValue) {
-    renderStory();
+    finishStoryEditorWithoutRender(editor);
     return;
   }
 
@@ -3808,7 +3842,7 @@ function commitStoryEditor(editor, cancel = false) {
   } else {
     const card = findCard(editor.dataset.cardId);
     if (!card) {
-      renderStory();
+      renderStory({ preserveScroll: true, immediatePagination: true });
       return;
     }
     if (editType === "header") {
@@ -3827,7 +3861,23 @@ function commitStoryEditor(editor, cancel = false) {
   }
 
   markDirty();
-  renderAll();
+  renderAll({ preserveStoryScroll: true, immediateStoryPagination: true });
+}
+
+// Exits an unchanged or canceled story edit without rebuilding the whole story pane.
+function finishStoryEditorWithoutRender(editor) {
+  const editType = editor.dataset.storyEdit || "";
+  if (Object.prototype.hasOwnProperty.call(editor.dataset, "originalHtml")) {
+    editor.innerHTML = editor.dataset.originalHtml;
+  }
+  editor.classList.remove("story-editing");
+  editor.removeAttribute("contenteditable");
+  editor.removeAttribute("spellcheck");
+  if (editType) editor.dataset.storyEdit = editType;
+  delete editor.dataset.originalValue;
+  delete editor.dataset.originalHtml;
+  delete editor.dataset.committed;
+  window.getSelection()?.removeAllRanges();
 }
 
 // Saves the current project JSON through the file picker or download fallback.
